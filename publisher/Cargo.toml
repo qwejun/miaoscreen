@@ -1,0 +1,26 @@
+[package]
+name = "catscreen"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[[bin]]
+name = "catscreen"
+path = "src/main.rs"
+
+[lib]
+name = "catscreen"
+path = "src/lib.rs"
+
+[dependencies]
+bongocat-input = { path = "../../kat/crates/bongocat-input" }
+bongocat-live2d-render = { path = "../../kat/crates/bongocat-live2d-render" }
+bongocat-model = { path = "../../kat/crates/bongocat-model" }
+bongocat-platform = { path = "../../kat/crates/bongocat-platform" }
+bongocat-render = { path = "../../kat/crates/bongocat-render" }
+bongocat-runtime = { path = "../../kat/crates/bongocat-runtime" }
+
+[lints]
+workspace = true

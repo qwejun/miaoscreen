@@ -1,0 +1,12 @@
+# 产物与本地状态
+/target/
+android/build/
+signing/*.keystore
+*.apk
+*.idsig
+
+# 日志与编辑器
+*.log
+.vs/
+.idea/
+*.user
