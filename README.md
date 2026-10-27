@@ -5,6 +5,13 @@
 
 这是一个自用的独立项目，围绕一款特定的小圆屏硬件打造，不追求通用性。
 
+## 下载
+
+不打算自己编译就看 [Releases](https://github.com/qwejun/miaoscreen/releases/latest)：
+
+- `MiaoScreen-*-windows-x64.exe` — PC 端，免安装，双击运行。
+- `CatScreen-*-android.apk` — 圆屏端，`adb install -r`。
+
 ## 结构
 
 ```text
@@ -55,11 +62,22 @@ adb shell am start -n com.bongocat.catscreen/.MainActivity --es address 192.168.
 | 0x12 | FRAME | 一帧的 drawable、顶点、索引、启用的键 |
 | 0x13 | CLEAR | 清空画面（隐藏模型） |
 | 0x14 | OVERLAY | 底部信息条：时间/日期/标语的模板与排版 |
-| 0x15 | PREVIEW_CTRL | 要不要回传画面（圆屏页打开时开启） |
+| 0x15 | PREVIEW_CTRL | 要不要回传画面（改设置或换模型时才请求一帧，不常开） |
 | 0x16 | PREVIEW_FRAME | 圆屏回传的 JPEG 快照，桌面端画成圆形预览 |
+| 0x17 | AUDIO_LIBRARY | 模型音效库一次性下发，设备端落盘缓存 |
+| 0x18 | AUDIO_PLAY | 播哪个音效，按 id 引用 |
+| 0x19 | AUDIO_STOP | 停止播放 |
+| 0x1A | LINK_STATS | 设备端每秒上报：收帧数、丢片数、解码耗时 |
+| 0x1B | FRAME_MARK | 空闲心跳，1 秒一次，画面不动也不掉线 |
+| 0x1C | RELINK | 换地址：有线/无线切换时通知设备端起新连接 |
+
+帧数据不走 TCP：`0x12` 的 payload 拆成 1180 字节切片，各自塞进独立的 UDP 数据报
+（`"MCAT" + type u8 + version u8 + reserved u16`，type 1 REGISTER / 2 ACK / 3 FRAME_SLICE / 4 CLEAR），
+UDP 端口 = TCP 端口 + 1。设备端按 `channel_seq` 重组，缺片直接弃掉这一帧，不等不重传。
 
 设计要点：桌面端只发几何与模板，不栅格化；时钟占位符（`{HH}:{mm}` 等）由设备端用本地时钟
-展开，断链后时间照走；设备端无状态，慢一帧只是丢一帧，不累积延迟。
+展开，断链后时间照走；设备端无状态，慢一帧只是丢一帧，不累积延迟。音频同样不实时推流——
+音效在连接时下发一次，播放由设备端本地完成，链路抖动不影响声音。
 
 ## 构建
 
