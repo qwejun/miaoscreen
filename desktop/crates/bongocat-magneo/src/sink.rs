@@ -180,6 +180,20 @@ impl MagneoSink {
         self.shared.stop_audio();
     }
 
+    /// Tell the panel to dial `address` instead of the one it is on.
+    ///
+    /// Does nothing when no panel is connected: the message only exists to move
+    /// a peer that is already listening, and an absent one will dial whatever
+    /// address it was started with.
+    pub fn relink(&self, address: &str) {
+        self.shared.set_relink(address);
+    }
+
+    /// Whether a panel is on the socket right now.
+    pub fn is_connected(&self) -> bool {
+        self.shared.is_connected()
+    }
+
     /// A cloneable handle for the settings window, which outlives the sink's
     /// trip into the render loop as a `FrameSink` trait object.
     pub fn handle(&self) -> MagneoHandle {
@@ -230,6 +244,16 @@ impl MagneoHandle {
     pub fn stop_audio(&self) {
         self.shared.stop_audio();
     }
+
+    /// Tell the connected panel to move to another address.
+    pub fn relink(&self, address: &str) {
+        self.shared.set_relink(address);
+    }
+
+    /// Whether a panel is on the socket right now.
+    pub fn is_connected(&self) -> bool {
+        self.shared.is_connected()
+    }
 }
 
 impl FrameSink for MagneoSink {
@@ -263,12 +287,31 @@ impl Drop for MagneoSink {
     }
 }
 
+/// Clears the connected flag however the connection ends.
+///
+/// `serve` has a dozen ways to return, and every one of them means the panel is
+/// no longer there. A guard makes that true by construction instead of by
+/// remembering to write it at each exit.
+struct ConnectedGuard(Arc<Shared>);
+
+impl Drop for ConnectedGuard {
+    fn drop(&mut self) {
+        self.0.connected.store(false, Ordering::Relaxed);
+    }
+}
+
 #[derive(Default)]
 struct Shared {
     slot: Mutex<Slot>,
     wake: Condvar,
     audio: Mutex<AudioState>,
     udp: Mutex<Option<Arc<UdpLink>>>,
+    /// Whether a panel is on the socket right now.
+    ///
+    /// The settings page shows this, so it has to be readable without touching
+    /// the slot lock: the worker holds that lock across every wake-up and a page
+    /// repaint must never wait on a blocked write to a slow panel.
+    connected: AtomicBool,
 }
 
 #[derive(Default)]
@@ -318,6 +361,11 @@ struct Slot {
     /// Set when the panel asked for frames over the control socket because the
     /// datagram path was not delivering them.
     datagrams_refused: bool,
+    /// The address the panel was last told to dial, and the revision that says
+    /// it still owes that message. Held here rather than in a queue because a
+    /// second switch before the first is delivered makes the first pointless.
+    relink: Option<Arc<str>>,
+    relink_revision: u64,
     closed: bool,
 }
 
@@ -333,6 +381,8 @@ struct Publication {
     overlay: Option<Arc<protocol::Overlay>>,
     audio_library: Option<Arc<Vec<(u32, Vec<u8>)>>>,
     audio_action: Option<AudioAction>,
+    relink_revision: u64,
+    relink: Option<Arc<str>>,
     datagrams_refused: bool,
 }
 
@@ -377,6 +427,31 @@ impl Shared {
         slot.overlay_revision = slot.overlay_revision.wrapping_add(1);
         drop(slot);
         self.wake.notify_all();
+    }
+
+    fn set_relink(&self, address: &str) {
+        let mut slot = self
+            .slot
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if slot.closed {
+            return;
+        }
+        slot.relink = Some(Arc::from(address));
+        slot.relink_revision = slot.relink_revision.wrapping_add(1);
+        drop(slot);
+        self.wake.notify_all();
+    }
+
+    fn is_connected(&self) -> bool {
+        self.connected.load(Ordering::Relaxed)
+    }
+
+    fn relink_revision(&self) -> u64 {
+        self.slot
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .relink_revision
     }
 
     fn overlay(&self) -> (u64, Option<Arc<protocol::Overlay>>) {
@@ -493,6 +568,7 @@ impl Shared {
         seen_preview: u64,
         seen_library: u64,
         seen_action: u64,
+        seen_relink: u64,
     ) -> Option<Publication> {
         let mut slot = self
             .slot
@@ -510,6 +586,7 @@ impl Shared {
             if slot.revision != seen_frame
                 || slot.overlay_revision != seen_overlay
                 || slot.preview_control_revision != seen_preview
+                || slot.relink_revision != seen_relink
                 || audio_changed
                 || slot.closed
             {
@@ -543,6 +620,8 @@ impl Shared {
             overlay: slot.overlay.clone(),
             audio_library: audio.library.clone(),
             audio_action: audio.action,
+            relink_revision: slot.relink_revision,
+            relink: slot.relink.clone(),
             datagrams_refused: slot.datagrams_refused,
         };
         drop(audio);
@@ -671,6 +750,8 @@ fn serve(mut stream: TcpStream, shared: &Arc<Shared>) -> bool {
     if stream.write_all(&protocol::hello(0)).is_err() {
         return false;
     }
+    shared.connected.store(true, Ordering::Relaxed);
+    let _connected = ConnectedGuard(Arc::clone(shared));
 
     // Snapshots, link reports and audio acknowledgements come back on the same
     // socket. The reader owns its own handle so it never contends with the frame
@@ -700,6 +781,10 @@ fn serve(mut stream: TcpStream, shared: &Arc<Shared>) -> bool {
     let mut seen_preview = 0;
     let mut seen_library = 0;
     let mut seen_action = 0;
+    // A switch requested before this connection existed is not replayed: it was
+    // aimed at the peer that was connected then, and a panel that has just
+    // arrived on its own has already made the same decision by itself.
+    let mut seen_relink = shared.relink_revision();
     let mut preview_sent: Option<bool> = None;
     let mut channel_sequence = 0u64;
     let mut last_mark: Option<Instant> = None;
@@ -711,6 +796,7 @@ fn serve(mut stream: TcpStream, shared: &Arc<Shared>) -> bool {
             seen_preview,
             seen_library,
             seen_action,
+            seen_relink,
         ) else {
             return true;
         };
@@ -722,6 +808,14 @@ fn serve(mut stream: TcpStream, shared: &Arc<Shared>) -> bool {
             if stream
                 .write_all(&protocol::preview_control(publication.preview_enabled))
                 .is_err()
+            {
+                return false;
+            }
+        }
+        if publication.relink_revision != seen_relink {
+            seen_relink = publication.relink_revision;
+            if let Some(address) = publication.relink.as_deref()
+                && stream.write_all(&protocol::relink(address)).is_err()
             {
                 return false;
             }
@@ -790,6 +884,20 @@ fn serve(mut stream: TcpStream, shared: &Arc<Shared>) -> bool {
         if sent.ensure_resources(&mut stream, frame).is_err() {
             return false;
         }
+        // A still picture has nothing to send, and a control socket that stays
+        // quiet longer than the panel's read timeout looks like a dead host: the
+        // panel closes it and reconnects, which is a visible blink on a model that
+        // is only breathing. The frame mark is already a per-second tick, so it
+        // doubles as the heartbeat and goes out whether or not the picture moved.
+        if !frames_changed && last_mark.is_none_or(|at| at.elapsed() >= MARK_INTERVAL) {
+            last_mark = Some(Instant::now());
+            if stream
+                .write_all(&protocol::frame_mark(channel_sequence))
+                .is_err()
+            {
+                return false;
+            }
+        }
         if !frames_changed {
             continue;
         }
@@ -797,12 +905,19 @@ fn serve(mut stream: TcpStream, shared: &Arc<Shared>) -> bool {
             (Some(address), Some(link)) => {
                 channel_sequence = channel_sequence.wrapping_add(1);
                 if sent.frame_number != Some(frame.frame_number) {
-                    let payload = protocol::frame(
+                    let message = protocol::frame(
                         frame.model_generation,
                         frame.frame_number,
                         &frame.snapshot,
                     );
-                    for slice in protocol::datagram_frame(channel_sequence, &payload) {
+                    // The datagram channel carries the body only. Its frame header
+                    // already names the kind, so repeating the five-byte message
+                    // header here would shift every field by five — which is what
+                    // the panel saw as "implausible count" on every single frame.
+                    let body = message
+                        .get(protocol::MESSAGE_HEADER_LEN..)
+                        .unwrap_or(&[]);
+                    for slice in protocol::datagram_frame(channel_sequence, body) {
                         link.send(&slice, address);
                     }
                     sent.frame_number = Some(frame.frame_number);

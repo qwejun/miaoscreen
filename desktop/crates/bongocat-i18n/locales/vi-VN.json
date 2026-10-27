@@ -403,6 +403,20 @@
       "connection": {
         "title": "Kết nối"
       },
+      "link": {
+        "label": "Kết nối",
+        "wireless": "Không dây (Wi-Fi)",
+        "wired": "Có dây (USB)"
+      },
+      "state": {
+        "label": "Trạng thái",
+        "connected": "Đã kết nối",
+        "waiting": "Đang chờ màn hình",
+        "adb_missing": "Không tìm thấy adb — không dùng được kết nối có dây",
+        "no_cable": "Không phát hiện thiết bị USB",
+        "tunnel_failed": "Không mở được đường hầm USB",
+        "launch_failed": "Không khởi động được màn hình qua USB"
+      },
       "address": {
         "label": "Địa chỉ"
       },
@@ -425,7 +439,7 @@
         "label": "Nội dung khẩu hiệu"
       },
       "preview": {
-        "title": "Xem trước trực tiếp",
+        "title": "Xem trước",
         "waiting": "Đang chờ màn hình…"
       }
     },

@@ -250,6 +250,8 @@ public final class CatRenderer implements GLSurfaceView.Renderer {
     private static final int PREVIEW_QUALITY = 62;
 
     private long lastPreviewNanos;
+    /** True while the host is between asking for a snapshot and getting one. */
+    private boolean previewWasRequested;
     private int[] previewPixels;
     private int[] previewRotated;
 
@@ -1411,11 +1413,19 @@ public final class CatRenderer implements GLSurfaceView.Renderer {
      * why nothing is captured when no host is listening.
      */
     private void maybeSendPreview() {
-        if (!client.isPreviewRequested() || viewWidth <= 0 || viewHeight <= 0) {
+        boolean requested = client.isPreviewRequested();
+        if (!requested || viewWidth <= 0 || viewHeight <= 0) {
+            previewWasRequested = false;
             return;
         }
         long now = System.nanoTime();
-        if (now - lastPreviewNanos < PREVIEW_INTERVAL_NANOS) {
+        // The host now asks for a snapshot just after something changed and stops
+        // asking as soon as one lands, so the first capture after a request must
+        // not wait for the interval — otherwise the request expires unanswered and
+        // the page keeps showing a picture from before the edit.
+        boolean first = !previewWasRequested;
+        previewWasRequested = true;
+        if (!first && now - lastPreviewNanos < PREVIEW_INTERVAL_NANOS) {
             return;
         }
         lastPreviewNanos = now;

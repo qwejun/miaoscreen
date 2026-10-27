@@ -43,13 +43,14 @@ final class PublisherClient implements Runnable, UdpFrameChannel.Sink {
     private static final int RETRY_DELAY_MS = 750;
 
     /**
-     * The publisher sends frames continuously, so a socket that stays silent is a
-     * socket whose tunnel is gone. Without this the reader blocks in
-     * {@code read()} forever after the adb server is restarted: the device's end
-     * of the reverse tunnel is never closed, so no end-of-stream arrives and the
-     * cat freezes while the thread sits there.
+     * The publisher ticks once a second even when the picture is still, so a
+     * socket that stays silent is a socket whose tunnel is gone. Without this the
+     * reader blocks in {@code read()} forever after the adb server is restarted:
+     * the device's end of the reverse tunnel is never closed, so no end-of-stream
+     * arrives and the cat freezes while the thread sits there. The value is a
+     * multiple of the host's tick so a single dropped tick is not a disconnect.
      */
-    private static final int READ_TIMEOUT_MS = 4000;
+    private static final int READ_TIMEOUT_MS = 12000;
 
     /** How often the host is told what arrived. */
     private static final long STATS_INTERVAL_MS = 2000;
@@ -73,20 +74,45 @@ final class PublisherClient implements Runnable, UdpFrameChannel.Sink {
     /** How many times a failed datagram channel is retried in one connection. */
     private static final int DATAGRAM_RETRIES = 3;
 
+    /** Where the last chosen address is remembered across restarts. */
+    private static final String PREFERENCES = "link";
+    private static final String PREFERENCE_ADDRESS = "address";
+
     private final Object lock = new Object();
     private final Frame shared = new Frame();
 
-    /** Where the publisher lives. The loopback default is the reverse tunnel;
-     * a LAN address covers the case where adb's tunnel is unavailable. */
-    private final String address;
+    /** The context, kept for the address preference. */
+    private final Context context;
+
+    /**
+     * Where the publisher lives.
+     *
+     * <p>Not final: the host moves the panel between the network and the cable
+     * while it is running, and the change arrives as a message on the very
+     * socket it is about to replace.
+     */
+    private volatile String address;
 
     private final UdpFrameChannel datagrams;
     private final AudioPlayer audio;
 
     PublisherClient(Context context, String address) {
-        this.address = address != null ? address : DEFAULT_ADDRESS;
+        this.context = context;
+        String remembered = context
+                .getSharedPreferences(PREFERENCES, Context.MODE_PRIVATE)
+                .getString(PREFERENCE_ADDRESS, null);
+        this.address = firstNonEmpty(address, remembered, DEFAULT_ADDRESS);
         this.datagrams = new UdpFrameChannel(this);
         this.audio = new AudioPlayer(context);
+    }
+
+    private static String firstNonEmpty(String... values) {
+        for (String value : values) {
+            if (value != null && !value.trim().isEmpty()) {
+                return value.trim();
+            }
+        }
+        return DEFAULT_ADDRESS;
     }
 
     private Scene pendingScene;
@@ -133,6 +159,37 @@ final class PublisherClient implements Runnable, UdpFrameChannel.Sink {
 
     void setListener(Listener listener) {
         this.listener = listener;
+    }
+
+    /** The address this client is trying to reach, for the host's own logging. */
+    String address() {
+        return address;
+    }
+
+    /**
+     * Moves to another publisher address.
+     *
+     * <p>Closing the socket is what makes the change take effect: the reader is
+     * blocked in {@code read()} on the old connection, and the loop above only
+     * dials again once that call has returned. The address is written before the
+     * close so the retry cannot read a half-applied pair.
+     */
+    void switchAddress(String target) {
+        if (target == null || target.trim().isEmpty()) {
+            return;
+        }
+        String next = target.trim();
+        if (next.equals(address)) {
+            return;
+        }
+        Log.i(TAG, "moving from " + address + " to " + next);
+        address = next;
+        context.getSharedPreferences(PREFERENCES, Context.MODE_PRIVATE)
+                .edit()
+                .putString(PREFERENCE_ADDRESS, next)
+                .apply();
+        closeQuietly(socket);
+        socket = null;
     }
 
     /** The newest decoded resources, or null when none arrived since the last call. */
@@ -238,7 +295,7 @@ final class PublisherClient implements Runnable, UdpFrameChannel.Sink {
     void stop() {
         running = false;
         datagrams.stop();
-        audio.releaseAll();
+        audio.close();
         closeQuietly(socket);
         socket = null;
     }
@@ -257,7 +314,16 @@ final class PublisherClient implements Runnable, UdpFrameChannel.Sink {
                 publish("connected", false);
                 // The datagram channel is per connection: a new control socket
                 // means the host may be a different process on a different port.
-                datagrams.open(endpoint.getHostString(), datagramPort(endpoint.getPort()));
+                //
+                // It is not opened over the cable. A reverse tunnel forwards TCP
+                // only, so a datagram sent to the loopback would be captured by
+                // this panel's own stack and never reach the host; frames would
+                // then stop arriving while every TCP counter looked healthy.
+                if (endpoint.getAddress() != null && endpoint.getAddress().isLoopbackAddress()) {
+                    datagrams.stop();
+                } else {
+                    datagrams.open(endpoint.getHostString(), datagramPort(endpoint.getPort()));
+                }
                 read(connection);
                 publish("publisher closed the connection", false);
             } catch (IOException error) {
@@ -345,6 +411,14 @@ final class PublisherClient implements Runnable, UdpFrameChannel.Sink {
                     lastMarkAt = System.currentTimeMillis();
                     lastMarkSequence = reader.u64();
                     break;
+                case Protocol.KIND_RELINK:
+                    if (reader.u32() != Protocol.VERSION) {
+                        throw new IOException("relink carries an unknown version");
+                    }
+                    switchAddress(reader.text(reader.bounded(256)));
+                    // The socket is being replaced, so there is nothing left to
+                    // read on it; the loop reconnects on its own.
+                    return;
                 case Protocol.KIND_PREVIEW_CTRL:
                     if (reader.u32() != Protocol.VERSION) {
                         throw new IOException("preview control carries an unknown version");
@@ -418,6 +492,19 @@ final class PublisherClient implements Runnable, UdpFrameChannel.Sink {
      * overwriting the faster one's work.
      */
     private boolean applyFrame(byte[] payload) {
+        // A host that predates the datagram body fix wraps the frame in the
+        // five-byte message header. That header is self-describing — kind then
+        // declared length — so the wrap is recognisable and an old host keeps
+        // working instead of driving every frame into the count check.
+        if (payload.length > 5 && (payload[0] & 0xFF) == Protocol.KIND_FRAME) {
+            int declared = (payload[1] & 0xFF)
+                    | ((payload[2] & 0xFF) << 8)
+                    | ((payload[3] & 0xFF) << 16)
+                    | ((payload[4] & 0xFF) << 24);
+            if (declared == payload.length - 5) {
+                payload = java.util.Arrays.copyOfRange(payload, 5, payload.length);
+            }
+        }
         if (payload.length < 20) {
             return false;
         }

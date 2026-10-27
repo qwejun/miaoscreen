@@ -2,6 +2,7 @@ package com.bongocat.catscreen;
 
 import android.app.Activity;
 import android.content.Context;
+import android.content.Intent;
 import android.graphics.Color;
 import android.net.wifi.WifiManager;
 import android.opengl.GLSurfaceView;
@@ -95,18 +96,22 @@ public final class MainActivity extends Activity {
         status.setShadowLayer(8f, 0f, 0f, Color.BLACK);
         status.setTextSize(TypedValue.COMPLEX_UNIT_SP, 18f);
         status.setGravity(Gravity.CENTER);
-        status.setText("loading");
+        status.setText("正在连接…");
         root.addView(status, new FrameLayout.LayoutParams(-1, -1, Gravity.CENTER));
 
         renderer.setStats(new CatRenderer.Stats() {
             @Override
             public void onStats(final String text, final boolean live) {
-                // The counters themselves go to logcat inside the renderer; all
-                // the panel shows is whether there is a picture to look at.
+                // The counters themselves go to logcat inside the renderer; the
+                // panel only needs to know whether there is a picture, and a live
+                // picture needs no words on it at all.
+                if (!live) {
+                    return;
+                }
                 runOnUiThread(new Runnable() {
                     @Override
                     public void run() {
-                        showStatus(live);
+                        showStatus(null);
                     }
                 });
             }
@@ -116,10 +121,11 @@ public final class MainActivity extends Activity {
             @Override
             public void onStatus(final String text, final boolean live) {
                 Log.i(TAG, "link: " + text);
+                final String label = live ? null : labelFor(text);
                 runOnUiThread(new Runnable() {
                     @Override
                     public void run() {
-                        showStatus(live);
+                        showStatus(label);
                     }
                 });
             }
@@ -132,6 +138,24 @@ public final class MainActivity extends Activity {
 
         Log.i(TAG, "manufacturer=" + Build.MANUFACTURER + " model=" + Build.MODEL
                 + " sdk=" + Build.VERSION.SDK_INT + " release=" + Build.VERSION.RELEASE);
+    }
+
+    /**
+     * A second launch, which is how the host moves the panel onto another path.
+     *
+     * <p>The activity is `singleTask`, so `adb shell am start` does not build a
+     * second surface: it arrives here. The panel stays connected across the
+     * change, which is the whole point — restarting the app would drop the
+     * window and flash the screen the user is looking at.
+     */
+    @Override
+    protected void onNewIntent(Intent intent) {
+        super.onNewIntent(intent);
+        setIntent(intent);
+        String address = intent != null ? intent.getStringExtra("address") : null;
+        if (client != null && address != null) {
+            client.switchAddress(address);
+        }
     }
 
     @Override
@@ -179,12 +203,39 @@ public final class MainActivity extends Activity {
     }
 
     /**
-     * Shows the panel's only chrome: a single word while there is nothing to
-     * draw. Anything more — frame age, frame rate, which half of the link failed —
-     * is in logcat, because on this panel it would sit on top of the cat.
+     * Turns the client's internal status into the one line the panel shows.
+     *
+     * <p>Three states, and they are the three a person standing in front of this
+     * thing can act on: waiting for a host, connected but nothing to draw yet, or
+     * the link dropped and it is trying again. Anything more specific than that
+     * is a developer's question, and logcat is where it is answered.
      */
-    private void showStatus(boolean live) {
-        status.setVisibility(live ? View.GONE : View.VISIBLE);
+    private static String labelFor(String text) {
+        if (text.startsWith("live")) {
+            return null;
+        }
+        if (text.startsWith("connected")) {
+            return "已连接，等待画面…";
+        }
+        if (text.startsWith("loading the model")) {
+            return "正在加载模型…";
+        }
+        return "连接中断，重试中…";
+    }
+
+    /**
+     * Shows the panel's only chrome: one line while there is nothing to draw.
+     *
+     * <p>A live picture needs no words on top of it — this panel has room for a
+     * cat or for text, not both.
+     */
+    private void showStatus(String label) {
+        if (label == null) {
+            status.setVisibility(View.GONE);
+            return;
+        }
+        status.setText(label);
+        status.setVisibility(View.VISIBLE);
     }
 
     /**

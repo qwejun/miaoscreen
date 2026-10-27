@@ -403,6 +403,20 @@
       "connection": {
         "title": "连接"
       },
+      "link": {
+        "label": "连接方式",
+        "wireless": "无线（Wi-Fi）",
+        "wired": "有线（USB）"
+      },
+      "state": {
+        "label": "状态",
+        "connected": "已连接",
+        "waiting": "等待圆屏接入",
+        "adb_missing": "未找到 adb，有线连接不可用",
+        "no_cable": "未检测到 USB 设备",
+        "tunnel_failed": "USB 端口转发失败",
+        "launch_failed": "无法通过 USB 启动圆屏"
+      },
       "address": {
         "label": "面板连接的地址"
       },
@@ -425,7 +439,7 @@
         "label": "标语"
       },
       "preview": {
-        "title": "实时预览",
+        "title": "预览",
         "waiting": "等待面板回传画面…"
       }
     },

@@ -403,6 +403,20 @@
       "connection": {
         "title": "Connection"
       },
+      "link": {
+        "label": "Connection",
+        "wireless": "Wireless (Wi-Fi)",
+        "wired": "Wired (USB)"
+      },
+      "state": {
+        "label": "Status",
+        "connected": "Connected",
+        "waiting": "Waiting for the panel",
+        "adb_missing": "adb not found — the cable path is unavailable",
+        "no_cable": "No USB device detected",
+        "tunnel_failed": "Could not open the USB tunnel",
+        "launch_failed": "Could not start the panel over USB"
+      },
       "address": {
         "label": "Address"
       },
@@ -425,7 +439,7 @@
         "label": "Banner text"
       },
       "preview": {
-        "title": "Live preview",
+        "title": "Preview",
         "waiting": "Waiting for the panel…"
       }
     },

@@ -403,6 +403,20 @@
       "connection": {
         "title": "الاتصال"
       },
+      "link": {
+        "label": "الاتصال",
+        "wireless": "لاسلكي (Wi-Fi)",
+        "wired": "سلكي (USB)"
+      },
+      "state": {
+        "label": "الحالة",
+        "connected": "متصل",
+        "waiting": "في انتظار الشاشة",
+        "adb_missing": "لم يتم العثور على adb — الاتصال السلكي غير متاح",
+        "no_cable": "لم يتم اكتشاف جهاز USB",
+        "tunnel_failed": "تعذّر فتح نفق USB",
+        "launch_failed": "تعذّر تشغيل الشاشة عبر USB"
+      },
       "address": {
         "label": "العنوان"
       },
@@ -425,7 +439,7 @@
         "label": "نص الشريط"
       },
       "preview": {
-        "title": "معاينة مباشرة",
+        "title": "معاينة",
         "waiting": "في انتظار الشاشة…"
       }
     },

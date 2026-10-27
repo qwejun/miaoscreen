@@ -17,10 +17,12 @@
 | `android/java/com/bongocat/catscreen/Overlay.java` | 圆屏底部信息条的模型：带高、底色、若干行（模板/字号/颜色/对齐/字重/字体/中心 Y）。 |
 | `android/res/values/strings.xml` | 设备端文案。 |
 | `android/java/com/bongocat/catscreen/UdpFrameChannel.java` | 帧通道：每秒向主机播报一次自己的数据报端口，按 `channel_seq` 重组分片，缺片即丢弃。另有 `LINK_STATS` 回报收到的帧数与是否要求回退 TCP。 |
+| `android/java/com/bongocat/catscreen/PublisherClient.java` | 地址不再是 `final`：`KIND_RELINK` 到达时改地址、写进 SharedPreferences、关掉旧 socket，重连循环下一轮就拨新地址。目标是回环地址时**不**开数据报通道——adb 反向隧道只转发 TCP，发给本机回环的 UDP 会被面板自己的协议栈吃掉，帧会静默停止而 TCP 计数器一切正常。 |
 | `android/java/com/bongocat/catscreen/MainActivity.java` | 窗口亮度锁 1.0（`sbrt=1.0`）、`KEEP_SCREEN_ON` / `TURN_SCREEN_ON` / `DISMISS_KEYGUARD`，`root.setKeepScreenOn(true)`。窗口亮度替换系统曲线而不缩放它，这是平板不会在闲置几秒后自己调暗的唯一开关；`onResume` 里重设一次，因为退到后台会把显示权交回策略管理器。 |
 | `android/java/com/bongocat/catscreen/AudioPlayer.java` | 把主机发来的音频库落到 `cacheDir/clips/clip-<id>`，用 `MediaPlayer` 预加载并按 id 播放；一条 clip 一个播放器，避免每次敲键都 prepare。 |
 | `desktop/crates/bongocat-audio/src/remote.rs` | `MotionAudioSink` trait 与 `RemoteAudioBackend`：把「播这个文件」转发给圆屏，本机扬声器不再出声。`prepare` 不解码，只读字节。 |
 | `desktop/crates/bongocat-app/src/audio_link.rs` | `ProductAudioSink`：音频服务先起来、发布端后创建，中间用这个可后挂的转发器接上。未挂载时全部调用为 no-op。 |
+| `desktop/crates/bongocat-app/src/usb_link.rs` | adb 的封装：找 adb（配置 → `MIAOSCREEN_ADB` → PATH → `ANDROID_HOME`/`ANDROID_SDK_ROOT` → SDK 默认位置）、`adb reverse tcp:N tcp:N`、`am start -f 0x20000000` 带 `--es address`。全部带 `CREATE_NO_WINDOW`，否则每次调用都会在桌面上闪一个黑框。`am` 的失败写在 stdout 且退出码为 0，所以还要看输出里有没有 `Error:` |
 | `scripts/dev/udp-probe.py` | 假主机，用来单独验证数据报通道与分片重组，不依赖产品。 |
 
 ## 修改
@@ -49,6 +51,7 @@
 | `0x19` | 主机 → 屏 | `u32 版本` |
 | `0x1A` | 屏 → 主机 | `u32 版本 + u64 完整帧数 + u64 数据报数 + u8 是否要求改走 TCP` |
 | `0x1B` | 主机 → 屏 | `u32 版本 + u64 帧序号` — 每秒一个，屏靠它发现自己收不到数据报 |
+| `0x1C` | 主机 → 屏 | `u32 版本 + u32 长度 + UTF-8 地址` — 换路。连接建立之后才发的才会生效：一条连接开始时取当前版本，所以连上之前排队的换路命令不会追着新连接再发一次 |
 
 数据报是独立格式，不复用 `kind + length`：`"MCAT" + u8 类型 + u8 版本 + u16 保留`，其后按类型带 `nonce`（注册/应答）、`channel_seq + 总长 + 片序 + 片数 + 字节`（帧片）或 `channel_seq`（清除）。切片载荷 1180 字节，低于常见 MTU，避免 IP 分片。
 
@@ -57,6 +60,7 @@
 ## 未做
 
 - 圆屏页面里的条带设置改动即刻生效，但**字体**仍是屏端内置的两款（`NotoSansHans`、`FZLanTYJW`），桌面端没有做字体下发。
+- 有线模式依赖 adb 服务常驻：`adb kill-server` 或拔线会丢掉反向隧道，这时页面上会显示「等待圆屏接入」，重新选一次「有线」就会重建。
 - 音频库每次连接、每次换模型都全量重传。改成内容哈希寻址（主机发 manifest、屏回报缺哪些）后重连就只剩握手，属下一步。
 - 音频服务在应用装配时就启动，而发布端要等窗口系统起来才存在，所以每次会话第一次 `set_library` 都早于 `attach`。`ProductAudioSink` 现在把这份库留到挂载时交接，否则启动后全程静音、要切一次模型才有声。
 - 设备扬声器档位音量出厂是 1/15（默认档 8、扬声器档 1）。这个系统的音量按输出设备分别记档，音量键只改当时活跃的那个；必须在 `start()` 之后对齐，那时流才路由到扬声器。

@@ -403,6 +403,20 @@
       "connection": {
         "title": "連線"
       },
+      "link": {
+        "label": "連線方式",
+        "wireless": "無線（Wi-Fi）",
+        "wired": "有線（USB）"
+      },
+      "state": {
+        "label": "狀態",
+        "connected": "已連線",
+        "waiting": "等待圓屏接入",
+        "adb_missing": "找不到 adb，有線連線不可用",
+        "no_cable": "未偵測到 USB 裝置",
+        "tunnel_failed": "USB 連接埠轉送失敗",
+        "launch_failed": "無法透過 USB 啟動圓屏"
+      },
       "address": {
         "label": "面板連線的位址"
       },
@@ -425,7 +439,7 @@
         "label": "標語"
       },
       "preview": {
-        "title": "即時預覽",
+        "title": "預覽",
         "waiting": "等待面板回傳畫面…"
       }
     },

@@ -403,6 +403,20 @@
       "connection": {
         "title": "Connexion"
       },
+      "link": {
+        "label": "Connexion",
+        "wireless": "Sans fil (Wi-Fi)",
+        "wired": "Filaire (USB)"
+      },
+      "state": {
+        "label": "État",
+        "connected": "Connecté",
+        "waiting": "En attente de l'écran",
+        "adb_missing": "adb introuvable — la liaison filaire est indisponible",
+        "no_cable": "Aucun appareil USB détecté",
+        "tunnel_failed": "Impossible d'ouvrir le tunnel USB",
+        "launch_failed": "Impossible de démarrer l'écran via USB"
+      },
       "address": {
         "label": "Adresse"
       },
@@ -425,7 +439,7 @@
         "label": "Texte du bandeau"
       },
       "preview": {
-        "title": "Aperçu en direct",
+        "title": "Aperçu",
         "waiting": "En attente de l'écran…"
       }
     },

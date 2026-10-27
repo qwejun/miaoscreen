@@ -330,16 +330,24 @@ impl Render for SettingsView {
         let device_address = device_page::device_link(cx)
             .map(|link| link.address())
             .unwrap_or_default();
-        // The snapshot stream costs the panel a full read-back and a JPEG encode
-        // per snapshot — measured at about ten frames a second while it runs — so
-        // it follows the page rather than the window: it starts when this page is
-        // the visible one and stops when the person looks somewhere else.
+        // The snapshot stream costs the panel a full framebuffer read-back and a
+        // JPEG encode, so it is not kept running: one picture is asked for when
+        // this page becomes visible, and another whenever a strip setting changes
+        // (see `apply_device_config`). Between those moments the page shows the
+        // last one, because nothing on the panel moves on its own.
         let device_page_visible = navigation_memory.page_index()
             == SettingsNavigationPage::DeviceScreen.index();
-        if device_page_visible {
-            self.start_device_preview_ticker(cx);
-        } else {
-            self.stop_device_preview(cx);
+        if device_page_visible != self.device_preview_page {
+            self.device_preview_page = device_page_visible;
+            if device_page_visible {
+                self.request_device_preview(cx);
+                // The state row is only meaningful while the page is on screen,
+                // and reading it costs one atomic load a second.
+                self.watch_device_status(cx);
+            } else {
+                self.stop_device_preview(cx);
+                self.stop_device_status();
+            }
         }
 
         let device_screen_page =
@@ -356,23 +364,128 @@ impl Render for SettingsView {
                             "settings.device_screen.connection.title",
                         ))
                         .items(with_search_keywords(
-                            vec![SettingItem::new(
-                                bongocat_i18n::text(
-                                    language.catalog_locale(),
-                                    "settings.device_screen.address.label",
+                            vec![
+                                SettingItem::new(
+                                    bongocat_i18n::text(
+                                        language.catalog_locale(),
+                                        "settings.device_screen.link.label",
+                                    ),
+                                    SettingField::dropdown(
+                                        vec![
+                                            (
+                                                SharedString::from(DeviceLinkMode::Wireless.id()),
+                                                SharedString::from(bongocat_i18n::text(
+                                                    language.catalog_locale(),
+                                                    "settings.device_screen.link.wireless",
+                                                )),
+                                            ),
+                                            (
+                                                SharedString::from(DeviceLinkMode::Wired.id()),
+                                                SharedString::from(bongocat_i18n::text(
+                                                    language.catalog_locale(),
+                                                    "settings.device_screen.link.wired",
+                                                )),
+                                            ),
+                                        ],
+                                        {
+                                            move |app: &App| {
+                                                SharedString::from(
+                                                    device_page::device_link(app)
+                                                        .map(|link| link.mode().id())
+                                                        .unwrap_or(DeviceLinkMode::Wireless.id()),
+                                                )
+                                            }
+                                        },
+                                        {
+                                            let view = view_entity.clone();
+                                            move |value: SharedString, app: &mut App| {
+                                                let mode = DeviceLinkMode::from_id(&value);
+                                                view.update(app, |view, cx| {
+                                                    view.set_device_link_mode(mode, cx);
+                                                });
+                                            }
+                                        },
+                                    ),
                                 ),
-                                SettingField::element({
-                                    let address = device_address.clone();
-                                    move |_: &RenderOptions, _: &mut Window, app: &mut App| {
-                                        div()
-                                            .font_family("monospace")
-                                            .text_sm()
-                                            .text_color(app.theme().muted_foreground)
-                                            .child(address.clone())
-                                            .into_any_element()
-                                    }
-                                }),
-                            )],
+                                SettingItem::new(
+                                    bongocat_i18n::text(
+                                        language.catalog_locale(),
+                                        "settings.device_screen.state.label",
+                                    ),
+                                    SettingField::element({
+                                        let view = view_entity.clone();
+                                        move |_: &RenderOptions, _: &mut Window, app: &mut App| {
+                                            let state = view.read(app).device_link_state;
+                                            let locale = language.catalog_locale();
+                                            let (text, color) = match state {
+                                                DeviceLinkState::Connected => (
+                                                    bongocat_i18n::text(
+                                                        locale,
+                                                        "settings.device_screen.state.connected",
+                                                    ),
+                                                    app.theme().success,
+                                                ),
+                                                DeviceLinkState::Waiting => (
+                                                    bongocat_i18n::text(
+                                                        locale,
+                                                        "settings.device_screen.state.waiting",
+                                                    ),
+                                                    app.theme().muted_foreground,
+                                                ),
+                                                DeviceLinkState::Unavailable(problem) => {
+                                                    let key = match problem {
+                                                        DeviceLinkProblem::AdbMissing => {
+                                                            "settings.device_screen.state.adb_missing"
+                                                        }
+                                                        DeviceLinkProblem::NoCable => {
+                                                            "settings.device_screen.state.no_cable"
+                                                        }
+                                                        DeviceLinkProblem::TunnelFailed => {
+                                                            "settings.device_screen.state.tunnel_failed"
+                                                        }
+                                                        DeviceLinkProblem::LaunchFailed => {
+                                                            "settings.device_screen.state.launch_failed"
+                                                        }
+                                                    };
+                                                    (
+                                                        bongocat_i18n::text(locale, key),
+                                                        app.theme().danger,
+                                                    )
+                                                }
+                                            };
+                                            div()
+                                                .flex()
+                                                .items_center()
+                                                .gap_2()
+                                                .child(div().size(px(8.)).rounded_full().bg(color))
+                                                .child(
+                                                    div()
+                                                        .text_sm()
+                                                        .text_color(color)
+                                                        .child(text),
+                                                )
+                                                .into_any_element()
+                                        }
+                                    }),
+                                ),
+                                SettingItem::new(
+                                    bongocat_i18n::text(
+                                        language.catalog_locale(),
+                                        "settings.device_screen.address.label",
+                                    ),
+                                    SettingField::element({
+                                        let address = device_address.clone();
+                                        move |_: &RenderOptions, _: &mut Window, app: &mut App| {
+                                            div()
+                                                .font_family("monospace")
+                                                .text_sm()
+                                                .text_color(app.theme().muted_foreground)
+                                                .child(address.clone())
+                                                .into_any_element()
+                                        }
+                                    }),
+                                ),
+                            ],
                             &device_keywords,
                         )),
                     SettingGroup::new()

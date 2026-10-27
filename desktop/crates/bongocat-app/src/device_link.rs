@@ -8,15 +8,21 @@
 //! a property of this fork's one device, not of the shared settings schema, and
 //! keeping it here means a future upstream merge has nothing to reconcile.
 
+use std::net::{IpAddr, Ipv4Addr, SocketAddr, UdpSocket};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 use bongocat_audio::MotionAudioSink;
 use bongocat_magneo::protocol::Overlay;
 use bongocat_magneo::MagneoHandle;
-use bongocat_ui::{DeviceLink, DeviceOverlayConfig};
+use bongocat_ui::{
+    DeviceLink, DeviceLinkMode, DeviceLinkProblem, DeviceLinkState, DeviceOverlayConfig,
+};
 use gpui_kit::App;
 use serde::{Deserialize, Serialize};
+
+use crate::usb_link;
 
 /// The publisher as the model's audio destination.
 ///
@@ -63,6 +69,12 @@ struct StoredConfig {
     clock: Option<String>,
     date: Option<String>,
     banner: Option<String>,
+    /// `wireless` or `wired`. Absent means the network, which needs no cable.
+    link: Option<String>,
+    /// Where `adb` lives when it is not on the PATH. Kept in the file because
+    /// the alternative is asking a person to set an environment variable for a
+    /// program they double-click.
+    adb: Option<String>,
 }
 
 impl StoredConfig {
@@ -84,14 +96,31 @@ impl StoredConfig {
             clock: Some(config.clock.clone()),
             date: Some(config.date.clone()),
             banner: Some(config.banner.clone()),
+            link: None,
+            adb: None,
         }
     }
 }
 
 pub(crate) struct ProductDeviceLink {
-    address: String,
+    /// What the publisher is listening on, kept for the case where this
+    /// machine's own address cannot be worked out and the page has to show
+    /// something.
+    bind: String,
+    port: u16,
     handle: MagneoHandle,
     config: Mutex<DeviceOverlayConfig>,
+    mode: Mutex<DeviceLinkMode>,
+    /// Why the cable path cannot work, or `None` while it can. Shared with the
+    /// worker that switches paths, so the page reads the result of a switch it
+    /// did not wait for.
+    problem: Arc<Mutex<Option<DeviceLinkProblem>>>,
+    /// Resolved once at startup: the answer cannot change without a restart, and
+    /// looking for `adb` means running it.
+    adb: Option<PathBuf>,
+    /// What the settings file said, so a switch rewrites the path it was given
+    /// rather than the resolved one.
+    adb_configured: Option<String>,
     path: Option<PathBuf>,
 }
 
@@ -110,17 +139,31 @@ impl ProductDeviceLink {
     /// the panel immediately so a connecting device has it before its first frame.
     pub(crate) fn install(cx: &mut App, address: &str, handle: MagneoHandle) -> Arc<Self> {
         let path = Self::config_path();
-        let config = path
+        let mut stored = path
             .as_ref()
             .and_then(|path| std::fs::read_to_string(path).ok())
             .and_then(|text| serde_json::from_str::<StoredConfig>(&text).ok())
-            .map(StoredConfig::into_config)
             .unwrap_or_default();
+        // Taken before the shape is consumed: `into_config` only cares about the
+        // strip, and these two belong to the link.
+        let link_id = stored.link.take();
+        let adb_configured = stored.adb.take();
+        let mode = DeviceLinkMode::from_id(link_id.as_deref().unwrap_or_default());
+        let config = stored.into_config();
+        let port = address
+            .parse::<SocketAddr>()
+            .map(|bound| bound.port())
+            .unwrap_or(7391);
 
         let link = Arc::new(Self {
-            address: address.to_owned(),
+            bind: address.to_owned(),
+            port,
             handle,
             config: Mutex::new(config.clone()),
+            mode: Mutex::new(mode),
+            problem: Arc::new(Mutex::new(None)),
+            adb: usb_link::locate(adb_configured.as_deref()),
+            adb_configured,
             path,
         });
         link.handle.set_overlay(Some(Arc::new(overlay_for(&config))));
@@ -131,10 +174,33 @@ impl ProductDeviceLink {
             link.handle.set_preview_enabled(true);
         }
         bongocat_ui::install_device_link(cx, Arc::clone(&link) as Arc<dyn DeviceLink>);
+        // Put the panel on the path the settings file asks for. A panel that is
+        // already there answers within a restart and nothing happens; one that
+        // is pointed somewhere else is moved, and one that is not running at all
+        // is started.
+        link.apply_mode();
         link
     }
 
-    fn persist(&self, config: &DeviceOverlayConfig) {
+    fn mode(&self) -> DeviceLinkMode {
+        *self
+            .mode
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+
+    /// The address the panel dials to reach this machine over the network.
+    fn wireless_address(&self) -> String {
+        match local_ipv4() {
+            Some(ip) => format!("{ip}:{}", self.port),
+            // Nothing here can be reached from another machine, but it is still
+            // better on the page than a blank: it says the machine has no LAN
+            // address, which is the actual problem.
+            None => self.bind.clone(),
+        }
+    }
+
+    fn persist(&self) {
         let Some(path) = self.path.as_ref() else {
             return;
         };
@@ -143,7 +209,15 @@ impl ProductDeviceLink {
         {
             return;
         }
-        let Ok(text) = serde_json::to_string_pretty(&StoredConfig::from_config(config)) else {
+        let config = self
+            .config
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone();
+        let mut stored = StoredConfig::from_config(&config);
+        stored.link = Some(self.mode().id().to_owned());
+        stored.adb = self.adb_configured.clone();
+        let Ok(text) = serde_json::to_string_pretty(&stored) else {
             return;
         };
         // Write beside the target and rename: a crash mid-write must not leave a
@@ -153,11 +227,105 @@ impl ProductDeviceLink {
             let _ = std::fs::rename(&temporary, path);
         }
     }
+
+    /// Moves the panel onto the current path, off the main thread.
+    ///
+    /// Three steps, in this order because each one is the fallback for the one
+    /// before it: open the tunnel if the cable is the path, ask the connected
+    /// panel to dial the new address, and — for a panel that is not connected at
+    /// all, and so cannot be asked — start it over the cable.
+    fn apply_mode(&self) {
+        let mode = self.mode();
+        let target = self.address();
+        let handle = self.handle.clone();
+        let problem = Arc::clone(&self.problem);
+        let adb = self.adb.clone();
+        let port = self.port;
+        let _ = std::thread::Builder::new()
+            .name("magneo-link".to_owned())
+            .spawn(move || {
+                let mut failure = None;
+                if mode == DeviceLinkMode::Wired {
+                    match adb.as_deref() {
+                        Some(adb) => failure = usb_link::prepare(adb, port).err(),
+                        None => failure = Some(DeviceLinkProblem::AdbMissing),
+                    }
+                }
+                *problem
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner) = failure;
+                handle.relink(&target);
+                // A panel that is connected now drops the socket to reconnect on
+                // the new address, so "connected" is false for a moment either
+                // way. The wait is what separates "moving" from "not there".
+                std::thread::sleep(Duration::from_secs(3));
+                if handle.is_connected() {
+                    return;
+                }
+                let Some(adb) = adb.as_deref() else {
+                    return;
+                };
+                if let Err(error) = usb_link::launch(adb, &target) {
+                    *problem
+                        .lock()
+                        .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(error);
+                }
+            });
+    }
+}
+
+/// This machine's address on the network the default route leaves by.
+///
+/// No packet is sent: connecting a datagram socket only asks the routing table
+/// which local address would carry one, which is exactly the question here.
+fn local_ipv4() -> Option<Ipv4Addr> {
+    let socket = UdpSocket::bind("0.0.0.0:0").ok()?;
+    socket.connect("8.8.8.8:80").ok()?;
+    match socket.local_addr().ok()?.ip() {
+        IpAddr::V4(ip) if !ip.is_loopback() && !ip.is_unspecified() => Some(ip),
+        _ => None,
+    }
 }
 
 impl DeviceLink for ProductDeviceLink {
     fn address(&self) -> String {
-        self.address.clone()
+        match self.mode() {
+            // The panel dials its own loopback and the tunnel carries it here.
+            DeviceLinkMode::Wired => format!("127.0.0.1:{}", self.port),
+            DeviceLinkMode::Wireless => self.wireless_address(),
+        }
+    }
+
+    fn mode(&self) -> DeviceLinkMode {
+        ProductDeviceLink::mode(self)
+    }
+
+    fn set_mode(&self, mode: DeviceLinkMode) {
+        if self.mode() != mode {
+            *self
+                .mode
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner) = mode;
+            self.persist();
+        }
+        // Re-applied even when the mode did not change: choosing the cable again
+        // after replugging it is the way to reopen a tunnel the debug server
+        // dropped, and it would be odd for that to do nothing.
+        self.apply_mode();
+    }
+
+    fn state(&self) -> DeviceLinkState {
+        if self.handle.is_connected() {
+            return DeviceLinkState::Connected;
+        }
+        match *self
+            .problem
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+        {
+            Some(problem) => DeviceLinkState::Unavailable(problem),
+            None => DeviceLinkState::Waiting,
+        }
     }
 
     fn apply_overlay(&self, config: &DeviceOverlayConfig) {
@@ -168,7 +336,7 @@ impl DeviceLink for ProductDeviceLink {
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         *stored = config.clone();
         drop(stored);
-        self.persist(config);
+        self.persist();
     }
 
     fn request_preview(&self, enabled: bool) {

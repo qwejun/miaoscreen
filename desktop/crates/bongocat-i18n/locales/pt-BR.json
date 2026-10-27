@@ -403,6 +403,20 @@
       "connection": {
         "title": "Conexão"
       },
+      "link": {
+        "label": "Conexão",
+        "wireless": "Sem fio (Wi-Fi)",
+        "wired": "Com fio (USB)"
+      },
+      "state": {
+        "label": "Estado",
+        "connected": "Conectado",
+        "waiting": "Aguardando o painel",
+        "adb_missing": "adb não encontrado — a conexão por cabo não está disponível",
+        "no_cable": "Nenhum dispositivo USB detectado",
+        "tunnel_failed": "Não foi possível abrir o túnel USB",
+        "launch_failed": "Não foi possível iniciar o painel por USB"
+      },
       "address": {
         "label": "Endereço"
       },
@@ -425,7 +439,7 @@
         "label": "Texto do banner"
       },
       "preview": {
-        "title": "Prévia ao vivo",
+        "title": "Prévia",
         "waiting": "Aguardando o painel…"
       }
     },

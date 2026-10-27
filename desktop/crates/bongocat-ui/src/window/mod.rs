@@ -86,7 +86,8 @@ use model_mver_dialog::build_mver_mode_dialog;
 mod models;
 mod navigation;
 pub use device_page::{
-    DeviceLink, DeviceOverlayConfig, device_page_index, install_device_link,
+    DeviceLink, DeviceLinkMode, DeviceLinkProblem, DeviceLinkState, DeviceOverlayConfig,
+    device_page_index, install_device_link,
 };
 pub use navigation::SettingsNavigationMemory;
 use navigation::{SettingsNavigationPage, model_library_search_keywords};
@@ -347,8 +348,19 @@ pub struct SettingsView {
     pub(crate) device_preview: Option<std::sync::Arc<gpui_kit::Image>>,
     /// The snapshot revision `device_preview` was decoded from.
     pub(crate) device_preview_revision: u64,
-    /// Whether the preview poll is already running for this window.
+    /// Whether a one-off snapshot request is already in flight.
     pub(crate) device_preview_ticker: bool,
+    /// Set when something changed while a request was already in flight, so the
+    /// newest state is fetched once that one lands instead of being dropped.
+    pub(crate) device_preview_pending: bool,
+    /// Whether the round panel page was the visible one on the last frame.
+    pub(crate) device_preview_page: bool,
+    /// Whether a panel is connected, as of the last look at the link.
+    pub(crate) device_link_state: DeviceLinkState,
+    /// Whether the page is currently watching the link.
+    pub(crate) device_status_ticker: bool,
+    /// Whether the watch loop is already running for this window.
+    pub(crate) device_status_running: bool,
     pub(crate) window_hidden: bool,
     pub(crate) navigation_memory: SettingsNavigationMemory,
     pub(crate) applied_theme: Option<SettingsTheme>,

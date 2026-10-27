@@ -32,6 +32,15 @@ final class Protocol {
     static final int KIND_LINK_STATS = 0x1A;
     /** Host to device: one frame number that was put on the datagram channel. */
     static final int KIND_FRAME_MARK = 0x1B;
+    /**
+     * Host to device: reconnect to another address.
+     *
+     * <p>A panel can reach the host over the network or over the USB cable, and
+     * the address it dials is different in each. The socket it is on is the only
+     * channel that can carry the change, because the change is what disconnects
+     * it.
+     */
+    static final int KIND_RELINK = 0x1C;
 
     /** The four bytes every datagram begins with. */
     static final byte[] DATAGRAM_MAGIC = {'M', 'C', 'A', 'T'};
@@ -215,6 +224,17 @@ final class Protocol {
             if (value < 0 || value > maximum) {
                 throw new IOException("implausible count " + value);
             }
+            return value;
+        }
+
+        /** Reads {@code length} bytes as UTF-8 text, with the same bounds check. */
+        String text(int length) throws IOException {
+            if (length < 0 || length > 256) {
+                throw new IOException("implausible text length " + length);
+            }
+            require(length);
+            String value = new String(payload, position, length, java.nio.charset.StandardCharsets.UTF_8);
+            position += length;
             return value;
         }
 

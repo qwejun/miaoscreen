@@ -403,6 +403,20 @@
       "connection": {
         "title": "연결"
       },
+      "link": {
+        "label": "연결 방식",
+        "wireless": "무선 (Wi-Fi)",
+        "wired": "유선 (USB)"
+      },
+      "state": {
+        "label": "상태",
+        "connected": "연결됨",
+        "waiting": "화면 연결 대기 중",
+        "adb_missing": "adb를 찾을 수 없어 유선 연결을 쓸 수 없습니다",
+        "no_cable": "USB 장치를 찾지 못했습니다",
+        "tunnel_failed": "USB 포트 전달에 실패했습니다",
+        "launch_failed": "USB로 화면을 시작하지 못했습니다"
+      },
       "address": {
         "label": "주소"
       },
@@ -425,7 +439,7 @@
         "label": "배너 문구"
       },
       "preview": {
-        "title": "실시간 미리보기",
+        "title": "미리보기",
         "waiting": "화면을 기다리는 중…"
       }
     },

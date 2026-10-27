@@ -64,10 +64,24 @@ pub const KIND_LINK_STATS: u8 = 0x1A;
 /// own: a datagram that never arrives is indistinguishable from a host that has
 /// nothing to draw.
 pub const KIND_FRAME_MARK: u8 = 0x1B;
+/// Host to device: move to another address.
+///
+/// The panel can reach this machine two ways — over the LAN, or over the USB
+/// cable through a reverse tunnel — and the address it dials is different in
+/// each. The socket it is on right now is the only channel that exists to say
+/// which one is wanted: the alternative, restarting the app from this side,
+/// needs a debug bridge that is exactly what is missing when the cable is out.
+pub const KIND_RELINK: u8 = 0x1C;
 
 /// The four bytes every datagram begins with, so a stray packet — or an old
 /// client still speaking the previous protocol — is dropped instead of parsed.
 pub const DATAGRAM_MAGIC: [u8; 4] = *b"MCAT";
+/// `kind: u8` + `length: u32` in front of every control-socket message.
+///
+/// The datagram channel carries the body alone: its own header already says
+/// which kind a slice belongs to, and repeating this one would put five bytes
+/// of length field where the panel expects `version`.
+pub const MESSAGE_HEADER_LEN: usize = 5;
 /// `MAGIC` + `type: u8` + `version: u8` + `reserved: u16`.
 pub const DATAGRAM_HEADER_LEN: usize = 8;
 /// The bytes of frame payload one datagram carries.
@@ -147,7 +161,7 @@ impl Writer {
 
     fn message(self, kind: u8) -> Vec<u8> {
         let length = u32::try_from(self.buffer.len()).unwrap_or(u32::MAX);
-        let mut out = Vec::with_capacity(self.buffer.len() + 5);
+        let mut out = Vec::with_capacity(self.buffer.len() + MESSAGE_HEADER_LEN);
         out.push(kind);
         out.extend_from_slice(&length.to_le_bytes());
         out.extend_from_slice(&self.buffer);
@@ -568,6 +582,19 @@ pub fn frame_mark(channel_sequence: u64) -> Vec<u8> {
     writer.u32(PROTOCOL_VERSION);
     writer.u64(channel_sequence);
     writer.message(KIND_FRAME_MARK)
+}
+
+/// Ask the panel to dial a different address.
+///
+/// The length is explicit rather than implied by the message size so a device
+/// can read the address as one UTF-8 block without trusting the socket's framing
+/// for it; the address is a few dozen bytes and the check costs nothing.
+pub fn relink(address: &str) -> Vec<u8> {
+    let mut writer = Writer::new();
+    writer.u32(PROTOCOL_VERSION);
+    writer.u32(u32::try_from(address.len()).unwrap_or(u32::MAX));
+    writer.raw(address.as_bytes());
+    writer.message(KIND_RELINK)
 }
 
 /// The datagram that announces this device to the host, and the one that answers

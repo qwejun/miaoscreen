@@ -10,7 +10,11 @@ import java.io.File;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.Map;
+import java.util.Set;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 /**
  * Plays the model's sounds on the panel's own speaker.
@@ -24,6 +28,11 @@ import java.util.Map;
  * <p>One player exists per clip and is kept between plays. A {@code MediaPlayer}
  * costs tens of milliseconds to prepare, and a keystroke sound that starts after
  * the keystroke is worse than no sound at all.
+ *
+ * <p>Loading runs on its own thread. A library is a few megabytes of writes plus
+ * one prepare per clip, and doing that on the socket thread stops the reads; the
+ * host's writes then back up until its own two-second write timeout closes a
+ * connection that was never broken.
  */
 final class AudioPlayer {
 
@@ -34,9 +43,20 @@ final class AudioPlayer {
     private final Map<Integer, MediaPlayer> players = new HashMap<>();
     private int playing = -1;
     /** Ids already reported as unloaded, so a missing clip logs once. */
-    private final java.util.Set<Integer> missing = new java.util.HashSet<>();
+    private final Set<Integer> missing = new HashSet<>();
     /** Set once the media stream has been aligned, after a clip actually played. */
     private boolean volumeAligned;
+
+    /** One library load at a time, ordered, off the socket thread. */
+    private final ExecutorService loader = Executors.newSingleThreadExecutor(
+            new java.util.concurrent.ThreadFactory() {
+                @Override
+                public Thread newThread(Runnable runnable) {
+                    Thread thread = new Thread(runnable, "audio-library");
+                    thread.setDaemon(true);
+                    return thread;
+                }
+            });
 
     AudioPlayer(Context context) {
         this.context = context;
@@ -71,8 +91,23 @@ final class AudioPlayer {
         }
     }
 
+    /**
+     * Hands a new library to the loader and returns immediately.
+     *
+     * <p>{@code payload} is already a private copy, so the socket thread can
+     * carry on reading the moment this returns.
+     */
+    void setLibrary(final byte[] payload, final int offset, final int count) {
+        loader.execute(new Runnable() {
+            @Override
+            public void run() {
+                load(payload, offset, count);
+            }
+        });
+    }
+
     /** Replaces the library. A clip that will not prepare is reported once. */
-    void setLibrary(byte[] payload, int offset, int count) {
+    private synchronized void load(byte[] payload, int offset, int count) {
         stop();
         releaseAll();
         File directory = new File(context.getCacheDir(), "clips");
@@ -111,7 +146,7 @@ final class AudioPlayer {
     }
 
     /** Starts one clip from the beginning, replacing whatever is playing. */
-    void play(int id, float volume) {
+    synchronized void play(int id, float volume) {
         MediaPlayer player = players.get(id);
         if (player == null) {
             // Once per id: a model whose sounds never arrived would otherwise fill
@@ -135,7 +170,7 @@ final class AudioPlayer {
         }
     }
 
-    void stop() {
+    synchronized void stop() {
         MediaPlayer player = playing < 0 ? null : players.get(playing);
         playing = -1;
         if (player == null) {
@@ -150,7 +185,7 @@ final class AudioPlayer {
         }
     }
 
-    void releaseAll() {
+    synchronized void releaseAll() {
         for (MediaPlayer player : players.values()) {
             try {
                 player.release();
@@ -160,6 +195,12 @@ final class AudioPlayer {
         }
         players.clear();
         playing = -1;
+    }
+
+    /** Stops the loader and frees every player. Used when the client shuts down. */
+    void close() {
+        loader.shutdownNow();
+        releaseAll();
     }
 
     private MediaPlayer prepare(File file) {
