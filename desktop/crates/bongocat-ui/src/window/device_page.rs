@@ -111,6 +111,10 @@ pub enum DeviceLinkProblem {
     AdbMissing,
     /// `adb` is there but sees no device on the other end of the cable.
     NoCable,
+    /// The device is on the bus but its debug daemon has not answered: `adb`
+    /// lists it as `offline` or `unauthorized`. This is the case a person can
+    /// fix by replugging, so it must not read as "nothing is plugged in".
+    UsbNotReady,
     /// The tunnel to this machine's own port could not be opened.
     TunnelFailed,
     /// The tunnel works but the panel would not start over it.
@@ -139,6 +143,13 @@ pub trait DeviceLink: Send + Sync + 'static {
     fn mode(&self) -> DeviceLinkMode;
     /// Switches paths and pushes the new address to the panel.
     fn set_mode(&self, mode: DeviceLinkMode);
+    /// Runs the cable checks again, off the caller's thread.
+    ///
+    /// The link retries on its own on a short clock, but that clock is four
+    /// seconds and the person in front of the machine has already fixed the
+    /// cable by the time they press the button — waiting for the next tick reads
+    /// as "the button did nothing".
+    fn retry(&self);
     /// Whether a panel is connected, and why not when the path itself is broken.
     fn state(&self) -> DeviceLinkState;
     /// Push the strip to the panel. Called on every edit, so it must be cheap.
@@ -317,6 +328,23 @@ impl SettingsView {
         // The switch is asynchronous — the tunnel and the panel's own reconnect
         // take a moment — so the page starts from "waiting" rather than keeping
         // the previous mode's answer on screen.
+        self.device_link_state = DeviceLinkState::Waiting;
+        cx.notify();
+    }
+
+    /// Runs the cable checks now, because the person just asked for them.
+    ///
+    /// The link has its own clock, so this is a shortcut rather than the only
+    /// path: it exists so that replugging the cable and pressing the button
+    /// answers within a moment instead of within a tick.
+    pub(crate) fn retry_device_link(&mut self, cx: &mut Context<Self>) {
+        let Some(link) = device_link(cx) else {
+            return;
+        };
+        link.retry();
+        // The check is asynchronous and its answer lands in the same place the
+        // poll reads, so the page goes back to "working on it" instead of
+        // keeping a verdict that may already be stale.
         self.device_link_state = DeviceLinkState::Waiting;
         cx.notify();
     }

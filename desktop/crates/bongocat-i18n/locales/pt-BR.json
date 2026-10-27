@@ -413,8 +413,10 @@
         "connected": "Conectado",
         "waiting": "Aguardando o painel",
         "adb_missing": "adb não encontrado — a conexão por cabo não está disponível",
+        "usb_not_ready": "USB conectado, mas não pronto — reconecte o cabo",
         "no_cable": "Nenhum dispositivo USB detectado",
         "tunnel_failed": "Não foi possível abrir o túnel USB",
+        "retry": "Verificar de novo",
         "launch_failed": "Não foi possível iniciar o painel por USB"
       },
       "address": {

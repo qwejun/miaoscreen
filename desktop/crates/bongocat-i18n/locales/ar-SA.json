@@ -413,8 +413,10 @@
         "connected": "متصل",
         "waiting": "في انتظار الشاشة",
         "adb_missing": "لم يتم العثور على adb — الاتصال السلكي غير متاح",
+        "usb_not_ready": "USB متصل لكنه غير جاهز — أعد توصيل الكابل",
         "no_cable": "لم يتم اكتشاف جهاز USB",
         "tunnel_failed": "تعذّر فتح نفق USB",
+        "retry": "تحقق مرة أخرى",
         "launch_failed": "تعذّر تشغيل الشاشة عبر USB"
       },
       "address": {

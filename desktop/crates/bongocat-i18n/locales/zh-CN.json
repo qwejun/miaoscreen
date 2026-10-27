@@ -413,8 +413,10 @@
         "connected": "已连接",
         "waiting": "等待圆屏接入",
         "adb_missing": "未找到 adb，有线连接不可用",
+        "usb_not_ready": "USB 已连接但未就绪，请重新插拔数据线",
         "no_cable": "未检测到 USB 设备",
         "tunnel_failed": "USB 端口转发失败",
+        "retry": "重新检测",
         "launch_failed": "无法通过 USB 启动圆屏"
       },
       "address": {

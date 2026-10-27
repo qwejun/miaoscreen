@@ -402,6 +402,14 @@ impl DeviceLink for ProductDeviceLink {
         self.apply_mode();
     }
 
+    fn retry(&self) {
+        // The same three steps as a mode switch, run again because the person
+        // asking has probably just replugged the cable. Running them on the
+        // switch's path rather than a second one keeps a single definition of
+        // what "the link is up" means.
+        self.apply_mode();
+    }
+
     fn state(&self) -> DeviceLinkState {
         if self.handle.is_connected() {
             return DeviceLinkState::Connected;

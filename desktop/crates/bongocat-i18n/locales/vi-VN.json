@@ -413,8 +413,10 @@
         "connected": "Đã kết nối",
         "waiting": "Đang chờ màn hình",
         "adb_missing": "Không tìm thấy adb — không dùng được kết nối có dây",
+        "usb_not_ready": "Đã cắm USB nhưng chưa sẵn sàng — rút ra cắm lại cáp",
         "no_cable": "Không phát hiện thiết bị USB",
         "tunnel_failed": "Không mở được đường hầm USB",
+        "retry": "Kiểm tra lại",
         "launch_failed": "Không khởi động được màn hình qua USB"
       },
       "address": {

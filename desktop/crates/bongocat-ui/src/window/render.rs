@@ -1,4 +1,5 @@
 use super::*;
+use gpui_kit::component::Sizable as _;
 use gpui_kit::{FileDropEvent, canvas};
 
 fn with_search_keywords<I>(items: I, keywords: &[SharedString]) -> impl Iterator<Item = SettingItem>
@@ -414,7 +415,9 @@ impl Render for SettingsView {
                                     ),
                                     SettingField::element({
                                         let view = view_entity.clone();
-                                        move |_: &RenderOptions, _: &mut Window, app: &mut App| {
+                                        move |options: &RenderOptions,
+                                              _: &mut Window,
+                                              app: &mut App| {
                                             let state = view.read(app).device_link_state;
                                             let locale = language.catalog_locale();
                                             let (text, color) = match state {
@@ -440,6 +443,9 @@ impl Render for SettingsView {
                                                         DeviceLinkProblem::NoCable => {
                                                             "settings.device_screen.state.no_cable"
                                                         }
+                                                        DeviceLinkProblem::UsbNotReady => {
+                                                            "settings.device_screen.state.usb_not_ready"
+                                                        }
                                                         DeviceLinkProblem::TunnelFailed => {
                                                             "settings.device_screen.state.tunnel_failed"
                                                         }
@@ -453,7 +459,7 @@ impl Render for SettingsView {
                                                     )
                                                 }
                                             };
-                                            div()
+                                            let mut row = div()
                                                 .flex()
                                                 .items_center()
                                                 .gap_2()
@@ -463,8 +469,29 @@ impl Render for SettingsView {
                                                         .text_sm()
                                                         .text_color(color)
                                                         .child(text),
-                                                )
-                                                .into_any_element()
+                                                );
+                                            // The link checks itself on its own clock,
+                                            // but the person reading this line has
+                                            // usually just touched the cable and
+                                            // should not have to wait a tick to be
+                                            // told whether it worked.
+                                            if state != DeviceLinkState::Connected {
+                                                let retry_view = view.clone();
+                                                row = row.child(
+                                                    Button::new("device-link-retry-button")
+                                                        .label(bongocat_i18n::text(
+                                                            locale,
+                                                            "settings.device_screen.state.retry",
+                                                        ))
+                                                        .with_size(options.size())
+                                                        .on_click(move |_, _, app| {
+                                                            retry_view.update(app, |view, cx| {
+                                                                view.retry_device_link(cx);
+                                                            });
+                                                        }),
+                                                );
+                                            }
+                                            row.into_any_element()
                                         }
                                     }),
                                 ),

@@ -14,6 +14,7 @@
 
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+use std::time::{Duration, Instant};
 
 use bongocat_ui::DeviceLinkProblem;
 
@@ -114,31 +115,86 @@ fn run(adb: &Path, args: &[&str]) -> Result<String, String> {
 
 /// The serial of the first device that is ready to talk.
 ///
-/// A device that is attached but still authorising shows up as `unauthorized`,
-/// and one that is mid-restart as `offline`; neither can carry a tunnel, so both
-/// are treated as "no cable yet" rather than as a transport error.
+/// Three states are worth telling apart, because they send a person to three
+/// different places: nothing on the bus at all (the cable), a device that is on
+/// the bus but whose debug daemon has not answered — `offline`, usually a
+/// wedged adbd, and `unauthorized`, a prompt nobody answered (the same cable,
+/// one replug away), and a device ready to carry a tunnel.
 fn serial(adb: &Path) -> Result<String, DeviceLinkProblem> {
     let listing = run(adb, &["devices"]).map_err(|_| DeviceLinkProblem::NoCable)?;
-    listing
-        .lines()
-        .skip(1)
-        .filter_map(|line| {
-            let mut fields = line.split_whitespace();
-            let serial = fields.next()?;
-            let state = fields.next()?;
-            (state == "device").then(|| serial.to_owned())
-        })
-        .next()
-        .ok_or(DeviceLinkProblem::NoCable)
+    let mut attached = false;
+    for line in listing.lines().skip(1) {
+        let mut fields = line.split_whitespace();
+        let Some(serial) = fields.next() else {
+            continue;
+        };
+        let Some(state) = fields.next() else {
+            continue;
+        };
+        if state == "device" {
+            return Ok(serial.to_owned());
+        }
+        // `offline` and `unauthorized` both mean "the cable is in and the
+        // transport is not up", which is a different instruction than "no USB
+        // device detected".
+        attached = true;
+    }
+    Err(if attached {
+        DeviceLinkProblem::UsbNotReady
+    } else {
+        DeviceLinkProblem::NoCable
+    })
 }
 
 /// Opens the reverse tunnel that makes this machine's port reachable on the panel.
 pub(crate) fn prepare(adb: &Path, port: u16) -> Result<(), DeviceLinkProblem> {
-    let serial = serial(adb)?;
+    let serial = match serial(adb) {
+        Ok(serial) => serial,
+        // A transport that is wedged is reset by replugging the cable, and
+        // `adb reconnect` is the same request without hands. It is worth one
+        // try before the page tells a person to get up, and it is rate-limited
+        // because a reconnect storm leaves the transport worse than it found it.
+        Err(DeviceLinkProblem::UsbNotReady) => {
+            nudge_transport(adb);
+            serial(adb)?
+        }
+        Err(problem) => return Err(problem),
+    };
     let spec = format!("tcp:{port}");
     run(adb, &["-s", &serial, "reverse", &spec, &spec])
         .map_err(|_| DeviceLinkProblem::TunnelFailed)?;
     Ok(())
+}
+
+/// How often a wedged transport may be reset before the answer is "replug it".
+const RECONNECT_INTERVAL: Duration = Duration::from_secs(10);
+
+static LAST_NUDGE: std::sync::Mutex<Option<Instant>> = std::sync::Mutex::new(None);
+
+/// Asks `adb` to reopen the transport of a device it can see but cannot talk to.
+///
+/// Two levers, cheapest first. A transport reset is what replugging the cable
+/// does, and it keeps the debug server — and anything tunneled through it —
+/// alive. A server that has latched onto a dead transport will not let go of it
+/// though, and restarting it costs only the tunnel this machine can reopen by
+/// itself, so that is the second lever rather than a thing for the person to do.
+fn nudge_transport(adb: &Path) {
+    let Ok(mut last) = LAST_NUDGE.lock() else {
+        return;
+    };
+    if last.is_some_and(|at| at.elapsed() < RECONNECT_INTERVAL) {
+        return;
+    }
+    *last = Some(Instant::now());
+    // Released before the subprocesses run: a second caller must not queue
+    // behind a `kill-server` that takes a second to settle.
+    drop(last);
+    let _ = run(adb, &["reconnect", "offline"]);
+    if serial(adb).is_ok() {
+        return;
+    }
+    let _ = run(adb, &["kill-server"]);
+    let _ = run(adb, &["start-server"]);
 }
 
 /// Starts the panel's app with `address`, or moves the running one to it.
