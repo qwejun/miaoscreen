@@ -19,6 +19,10 @@ import android.widget.TextView;
  * <p>The activity owns a fullscreen GL surface and a status line that is only
  * visible while there is nothing to draw: a live picture needs no chrome, and the
  * panel has no bezel to hide an overlay in.
+ *
+ * <p>The status line says one word. Frame rate, resolution, mask and key counters
+ * belong in logcat, where they are readable without covering the picture — a
+ * panel this size has room for a cat or for diagnostics, not both.
  */
 public final class MainActivity extends Activity {
 
@@ -28,8 +32,6 @@ public final class MainActivity extends Activity {
     private TextView status;
     private PublisherClient client;
     private Thread clientThread;
-    private String clientStatus = "waiting for the publisher";
-    private String rendererStatus = "";
 
     @Override
     protected void onCreate(Bundle savedState) {
@@ -62,20 +64,19 @@ public final class MainActivity extends Activity {
         status = new TextView(this);
         status.setTextColor(Color.WHITE);
         status.setShadowLayer(8f, 0f, 0f, Color.BLACK);
-        status.setTextSize(TypedValue.COMPLEX_UNIT_SP, 16f);
+        status.setTextSize(TypedValue.COMPLEX_UNIT_SP, 18f);
         status.setGravity(Gravity.CENTER);
-        status.setText("CatScreen\nwaiting for the publisher\n"
-                + Build.MANUFACTURER + " " + Build.MODEL
-                + "  ·  Android " + Build.VERSION.RELEASE);
-        root.addView(status, new FrameLayout.LayoutParams(-1, -2, Gravity.TOP));
+        status.setText("loading");
+        root.addView(status, new FrameLayout.LayoutParams(-1, -1, Gravity.CENTER));
 
         renderer.setStats(new CatRenderer.Stats() {
             @Override
             public void onStats(final String text, final boolean live) {
+                // The counters themselves go to logcat inside the renderer; all
+                // the panel shows is whether there is a picture to look at.
                 runOnUiThread(new Runnable() {
                     @Override
                     public void run() {
-                        rendererStatus = text;
                         showStatus(live);
                     }
                 });
@@ -85,10 +86,10 @@ public final class MainActivity extends Activity {
         client.setListener(new PublisherClient.Listener() {
             @Override
             public void onStatus(final String text, final boolean live) {
+                Log.i(TAG, "link: " + text);
                 runOnUiThread(new Runnable() {
                     @Override
                     public void run() {
-                        clientStatus = text;
                         showStatus(live);
                     }
                 });
@@ -138,16 +139,12 @@ public final class MainActivity extends Activity {
     }
 
     /**
-     * Shows the panel's only diagnostic surface: what the reader is doing and
-     * what the last frame was. Both halves matter — the reader knows whether the
-     * link is up, and the renderer knows how old the picture is — and neither can
-     * be read from a screenshot alone.
+     * Shows the panel's only chrome: a single word while there is nothing to
+     * draw. Anything more — frame age, frame rate, which half of the link failed —
+     * is in logcat, because on this panel it would sit on top of the cat.
      */
     private void showStatus(boolean live) {
         status.setVisibility(live ? View.GONE : View.VISIBLE);
-        if (!live) {
-            status.setText("CatScreen\n" + clientStatus + "\n" + rendererStatus);
-        }
     }
 
     private void hideSystemUi() {

@@ -45,7 +45,17 @@ pub(crate) struct RunOptions {
     /// model is still driven by this machine's keyboard, mouse and gamepads;
     /// only the drawing moves. Hidden because it is a target reached through a
     /// launcher rather than a documented command line.
-    #[arg(long, value_name = "ADDRESS", hide = true)]
+    ///
+    /// The address has a default: this build exists to drive one round panel, so
+    /// double-clicking the executable has to work without arguments. A desktop
+    /// window mode is no longer what anyone launches here, and asking the person
+    /// to append flags to a shortcut is exactly the step that breaks.
+    #[arg(
+        long,
+        value_name = "ADDRESS",
+        hide = true,
+        default_value = "0.0.0.0:7391"
+    )]
     pub(crate) device_screen: Option<String>,
 
     /// Open the settings window without instrumenting the run.
