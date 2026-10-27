@@ -17,8 +17,10 @@ patches/     对 desktop 的改动备份与说明
 ```
 
 `desktop/` 基于 [BongoCat](https://github.com/ayangweb/BongoCat)（Apache-2.0）改造：
-圆屏相关的 sink 与协议位于 `desktop/crates/bongocat-magneo/`，桌面窗口部分对本项目无用但未删除。
-相对上游的改动记录在 `patches/`。
+圆屏相关的 sink 与协议位于 `desktop/crates/bongocat-magneo/`。
+上游在桌面窗口上做的那套设置（窗口模式、置顶、穿透、缩放、透明度、最大帧率、悬停/空闲隐藏）
+对本项目没有意义，界面已经删掉，其中「桌面窗口」那一页换成了「圆屏」页。
+相对上游的完整改动记录在 `patches/CHANGES-vs-upstream.md`。
 
 ## 运行
 
@@ -53,6 +55,8 @@ adb shell am start -n com.bongocat.catscreen/.MainActivity --es address 192.168.
 | 0x12 | FRAME | 一帧的 drawable、顶点、索引、启用的键 |
 | 0x13 | CLEAR | 清空画面（隐藏模型） |
 | 0x14 | OVERLAY | 底部信息条：时间/日期/标语的模板与排版 |
+| 0x15 | PREVIEW_CTRL | 要不要回传画面（圆屏页打开时开启） |
+| 0x16 | PREVIEW_FRAME | 圆屏回传的 JPEG 快照，桌面端画成圆形预览 |
 
 设计要点：桌面端只发几何与模板，不栅格化；时钟占位符（`{HH}:{mm}` 等）由设备端用本地时钟
 展开，断链后时间照走；设备端无状态，慢一帧只是丢一帧，不累积延迟。
