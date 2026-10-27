@@ -7,10 +7,15 @@
 //! because a manifest is requested through them before the official endpoint, and
 //! a build behind a corporate proxy has to work without being configured twice.
 
-/// The repository that publishes BongoCat releases.
-pub const RELEASE_REPOSITORY_OWNER: &str = "ayangweb";
+/// The repository that publishes this product's releases.
+///
+/// The upstream default was `ayangweb/BongoCat`. Repointing it matters even
+/// with the update button gone: any path that still asks for a manifest would
+/// otherwise fetch the upstream cat app's release and offer to install it over
+/// this one.
+pub const RELEASE_REPOSITORY_OWNER: &str = "qwejun";
 
-pub const RELEASE_REPOSITORY_NAME: &str = "BongoCat";
+pub const RELEASE_REPOSITORY_NAME: &str = "miaoscreen";
 
 /// The repository that publishes independently versioned plugin releases.
 pub const PLUGIN_REPOSITORY_OWNER: &str = "ayangweb";

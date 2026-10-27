@@ -9,8 +9,12 @@
 
 不打算自己编译就看 [Releases](https://github.com/qwejun/miaoscreen/releases/latest)：
 
-- `MiaoScreen-*-windows-x64.exe` — PC 端，免安装，双击运行。
-- `CatScreen-*-android.apk` — 圆屏端，`adb install -r`。
+- `MiaoScreen-*-windows-x64.zip` — PC 端。解压到任意目录，双击 `MiaoScreen.exe`。
+  压缩包里的 `resources/models/` 和 `vcruntime140.dll` 必须和 exe 放在一起，缺了就打不开。
+- `CatScreen-*-android.apk` — 圆屏端，`adb install -r`，或拷到设备上直接点安装（需允许未知来源）。
+
+PC 端要求 Windows 10 以上（用 D3D11 + DirectWrite）。不需要装 .NET，也不需要管理员权限。
+安卓端 `minSdkVersion 22`，Android 5.1 以上。
 
 ## 结构
 

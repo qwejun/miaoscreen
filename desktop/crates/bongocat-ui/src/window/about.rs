@@ -12,7 +12,7 @@ pub(super) const FEEDBACK_URL: &str = "https://github.com/qwejun/miaoscreen/issu
 /// Every user-visible string on the About page belongs to this small contract.
 /// Keeping it beside the page assembly makes the settings smoke check cover
 /// the same rows that users can actually reach.
-pub(super) const ABOUT_LOCALIZED_KEYS: [&str; 12] = [
+pub(super) const ABOUT_LOCALIZED_KEYS: [&str; 11] = [
     "about.product_information.version.title",
     "about.software_information.title",
     "about.software_information.description",
@@ -24,7 +24,6 @@ pub(super) const ABOUT_LOCALIZED_KEYS: [&str; 12] = [
     "about.feedback.action",
     "about.logs.title",
     "about.logs.action",
-    "update.about.label",
 ];
 
 /// The product identity the report names, and the About page's own row title.
@@ -263,23 +262,24 @@ fn product_info_description(snapshot: Option<&SettingsSnapshot>) -> String {
 /// actions: this page does not invent a second persisted preference for
 /// information that is already owned by the application and its services.
 ///
-/// The page shows one button per row, so five same-coloured buttons in a
+/// The page shows one button per row, so four same-coloured buttons in a
 /// column are told apart by their labels alone. The page is a quiet one, so it
-/// uses three tiers instead of a colour per row: checking for updates is the
-/// single filled `primary` action, reporting an issue is the one row that wants
-/// an answer and carries `danger`, and the three rows that only read or open
-/// something stay on the library's plain default button. A colour that means
-/// nothing on its row is noise, and every colour that is used comes from the
-/// active theme rather than a hardcoded value, which needs no branch for a
-/// light/dark switch:
+/// uses three tiers instead of a colour per row: reporting an issue is the one
+/// row that wants an answer and carries `danger`, and the three rows that only
+/// read or open something stay on the library's plain default button. A colour
+/// that means nothing on its row is noise, and every colour that is used comes
+/// from the active theme rather than a hardcoded value, which needs no branch
+/// for a light/dark switch:
 ///
 /// | row | variant | reads as |
 /// | --- | --- | --- |
-/// | checking for updates | `primary` | the one action that changes the app |
 /// | copy software information | `Default` | a read-only action |
 /// | open the project home | `Default` | a read-only action |
 /// | report an issue | `danger` + outline | the row that wants an answer |
 /// | open the log folder | `Default` | a read-only action |
+///
+/// The product row above them carries no control at all: it names the build and
+/// shows its version, and there is nowhere for the user to go from there.
 ///
 /// `danger` is borrowed here as "this one wants an answer", not as a claim that
 /// the action is destructive; the window's own destructive surfaces keep their
@@ -299,27 +299,17 @@ pub(super) fn operational_group(
     snapshot: Option<&SettingsSnapshot>,
     language: SettingsLanguage,
     keywords: Vec<SharedString>,
-    request_update: SettingsWindowRequest,
 ) -> SettingGroup {
     let locale = language.catalog_locale();
     let product_description = product_info_description(snapshot);
 
-    let update_view = view.clone();
-    let update_request = request_update;
+    // The product row is read-only: name on the left, build identity under it,
+    // nothing on the right. An update button used to live here and pointed at a
+    // release feed this project does not publish, so it could only ever answer
+    // "no update available" for a build that is distributed as a zip by hand.
     let product = SettingItem::new(
         PRODUCT_NAME,
-        SettingField::element(
-            move |options: &RenderOptions, _: &mut Window, app: &mut App| {
-                let available = update_view.read(app).snapshot.is_some();
-                let request = update_request.clone();
-                Button::new("about-check-for-updates-button")
-                    .label(bongocat_i18n::text(locale, "update.about.label"))
-                    .with_size(options.size())
-                    .primary()
-                    .disabled(!available)
-                    .on_click(move |_, _, app| (request)(app))
-            },
-        ),
+        SettingField::element(|_: &RenderOptions, _: &mut Window, _: &mut App| gpui_kit::div()),
     )
     .description(product_description)
     .keywords(keywords.clone());

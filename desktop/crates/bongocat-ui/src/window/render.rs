@@ -1549,7 +1549,6 @@ impl Render for SettingsView {
                 snapshot.as_ref(),
                 language,
                 about_keywords,
-                self.request_update.clone(),
             ));
 
         let settings = Settings::new("bongocat-settings")
