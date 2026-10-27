@@ -55,6 +55,26 @@ final class Protocol {
 
     static final int VERSION = 1;
 
+    /**
+     * One announcement packet: the header, then the nonce that identifies this
+     * panel.
+     *
+     * <p>The host answers with the same nonce, which is what tells a panel its
+     * own answer apart from a second host's broadcast on the same network. The
+     * same packet is used for the unicast announcement that keeps a NAT binding
+     * open and for the broadcast that asks a network for a host at all.
+     */
+    static byte[] datagramRegister(long nonce) {
+        byte[] out = new byte[DATAGRAM_HEADER_LEN + 8];
+        System.arraycopy(DATAGRAM_MAGIC, 0, out, 0, DATAGRAM_MAGIC.length);
+        out[4] = (byte) DATAGRAM_REGISTER;
+        out[5] = (byte) VERSION;
+        for (int i = 0; i < 8; i++) {
+            out[8 + i] = (byte) (nonce >>> (8 * i));
+        }
+        return out;
+    }
+
     static final int BLEND_NORMAL = 0;
     static final int BLEND_ADDITIVE = 1;
     static final int BLEND_MULTIPLICATIVE = 2;

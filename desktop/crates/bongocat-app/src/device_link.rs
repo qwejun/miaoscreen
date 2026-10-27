@@ -127,7 +127,7 @@ pub(crate) struct ProductDeviceLink {
     port: u16,
     handle: MagneoHandle,
     config: Mutex<DeviceOverlayConfig>,
-    mode: Mutex<DeviceLinkMode>,
+    mode: Arc<Mutex<DeviceLinkMode>>,
     /// Why the cable path cannot work, or `None` while it can. Shared with the
     /// worker that switches paths, so the page reads the result of a switch it
     /// did not wait for.
@@ -177,7 +177,7 @@ impl ProductDeviceLink {
             port,
             handle,
             config: Mutex::new(config.clone()),
-            mode: Mutex::new(mode),
+            mode: Arc::new(Mutex::new(mode)),
             problem: Arc::new(Mutex::new(None)),
             adb: usb_link::locate(adb_configured.as_deref()),
             adb_configured,
@@ -242,6 +242,12 @@ impl ProductDeviceLink {
                     };
                     let failure = usb_link::prepare(adb, link.port).err();
                     let opened = failure.is_none();
+                    // The check just ran against the cable. If the mode moved
+                    // while it did, the answer belongs to a path the person has
+                    // already left, so it is dropped rather than stored.
+                    if link.mode() != DeviceLinkMode::Wired {
+                        continue;
+                    }
                     *link
                         .problem
                         .lock()
@@ -327,6 +333,7 @@ impl ProductDeviceLink {
         let target = self.address();
         let handle = self.handle.clone();
         let problem = Arc::clone(&self.problem);
+        let current_mode = Arc::clone(&self.mode);
         let adb = self.adb.clone();
         let port = self.port;
         let _ = std::thread::Builder::new()
@@ -339,9 +346,18 @@ impl ProductDeviceLink {
                         None => failure = Some(DeviceLinkProblem::AdbMissing),
                     }
                 }
-                *problem
+                // The cable check takes a moment and the switch does not wait for
+                // it, so the result is only stored while it still describes the
+                // path in use.
+                if *current_mode
                     .lock()
-                    .unwrap_or_else(std::sync::PoisonError::into_inner) = failure;
+                    .unwrap_or_else(std::sync::PoisonError::into_inner)
+                    == mode
+                {
+                    *problem
+                        .lock()
+                        .unwrap_or_else(std::sync::PoisonError::into_inner) = failure;
+                }
                 handle.relink(&target);
                 // A panel that is connected now drops the socket to reconnect on
                 // the new address, so "connected" is false for a moment either
@@ -395,6 +411,16 @@ impl DeviceLink for ProductDeviceLink {
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner) = mode;
             self.persist();
+            // Drop the other path's verdict in the same breath as the switch. A
+            // watchdog tick that began before this call is still in flight and
+            // would otherwise land afterwards, reporting a cable problem on a
+            // link that no longer uses the cable.
+            if mode != DeviceLinkMode::Wired {
+                *self
+                    .problem
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner) = None;
+            }
         }
         // Re-applied even when the mode did not change: choosing the cable again
         // after replugging it is the way to reopen a tunnel the debug server
@@ -413,6 +439,14 @@ impl DeviceLink for ProductDeviceLink {
     fn state(&self) -> DeviceLinkState {
         if self.handle.is_connected() {
             return DeviceLinkState::Connected;
+        }
+        // A cable problem only describes the cable path. Over the network the
+        // panel is not supposed to be on the cable at all, so a verdict left
+        // over from the last wired tick must not be shown as the reason a
+        // wireless link is down — it would send a person to check a cable that
+        // has nothing to do with the connection they chose.
+        if self.mode() != DeviceLinkMode::Wired {
+            return DeviceLinkState::Waiting;
         }
         match *self
             .problem

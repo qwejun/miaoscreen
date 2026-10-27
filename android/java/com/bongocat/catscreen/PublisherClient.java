@@ -41,6 +41,16 @@ final class PublisherClient implements Runnable, UdpFrameChannel.Sink {
     private static final int DEFAULT_PORT = 7391;
     private static final int CONNECT_TIMEOUT_MS = 2000;
     private static final int RETRY_DELAY_MS = 750;
+    /**
+     * How many refusals in a row before the address is doubted.
+     *
+     * <p>The host restarts and the tunnel drops for a moment, so one refusal is
+     * noise. Two is the point where retrying the same address starts costing
+     * more than asking the network where the host went.
+     */
+    private static final int DISCOVER_AFTER_FAILURES = 2;
+    /** How long one discovery round listens for an answer. */
+    private static final int DISCOVERY_TIMEOUT_MS = 1200;
 
     /**
      * The publisher ticks once a second even when the picture is still, so a
@@ -311,6 +321,7 @@ final class PublisherClient implements Runnable, UdpFrameChannel.Sink {
     @Override
     public void run() {
         long lastStats = 0;
+        int failures = 0;
         while (running) {
             Socket connection = new Socket();
             InetSocketAddress endpoint = parseAddress(address);
@@ -319,6 +330,7 @@ final class PublisherClient implements Runnable, UdpFrameChannel.Sink {
                 connection.setTcpNoDelay(true);
                 connection.setSoTimeout(READ_TIMEOUT_MS);
                 socket = connection;
+                failures = 0;
                 publish("connected", false);
                 // The datagram channel is per connection: a new control socket
                 // means the host may be a different process on a different port.
@@ -353,6 +365,25 @@ final class PublisherClient implements Runnable, UdpFrameChannel.Sink {
             }
             if (!running) {
                 break;
+            }
+            failures++;
+            // After a couple of refusals, stop trusting the address and ask the
+            // network. The path this panel was told about is the path it is
+            // stuck on, and the host cannot correct it over a link that is down:
+            // a panel left on a loopback port after the cable went away would
+            // otherwise retry forever at an address nothing answers.
+            if (failures >= DISCOVER_AFTER_FAILURES
+                    && failures % DISCOVER_AFTER_FAILURES == 0) {
+                InetSocketAddress found =
+                        HostDiscovery.find(endpoint.getPort(), DISCOVERY_TIMEOUT_MS);
+                if (found != null) {
+                    String next = found.getAddress().getHostAddress() + ":" + found.getPort();
+                    if (!next.equals(address)) {
+                        Log.i(TAG, "discovery moved us from " + address + " to " + next);
+                        switchAddress(next);
+                        failures = 0;
+                    }
+                }
             }
             sleep(RETRY_DELAY_MS);
         }
