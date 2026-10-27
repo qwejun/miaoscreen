@@ -16,6 +16,10 @@ fn run_options_default_to_an_unbounded_product_lifetime() {
             settings_window_smoke: false,
             settings_window_open_smoke: false,
             models_page_smoke: false,
+            device_page_smoke: false,
+            // The panel address has a default, so an unconfigured run is already
+            // publishing: double-clicking the binary is the intended entry point.
+            device_screen: Some("0.0.0.0:7391".to_owned()),
             hidden_model_switch_smoke: false,
             #[cfg(feature = "storage-test-injection")]
             settings_window_state_smoke: false,

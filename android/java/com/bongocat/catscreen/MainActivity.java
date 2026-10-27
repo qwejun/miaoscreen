@@ -48,13 +48,24 @@ public final class MainActivity extends Activity {
     protected void onCreate(Bundle savedState) {
         super.onCreate(savedState);
 
+        // The panel is looked at, not operated: a display that dims after a few
+        // idle seconds makes the cat disappear at exactly the moment nobody is
+        // touching anything. Three things are needed, and none of them is
+        // sufficient alone — keep-screen-on stops the display from sleeping, the
+        // window brightness overrides the automatic curve that dims it first, and
+        // the turn-screen-on flags make a cold start wake a unit that was already
+        // dark instead of painting into a sleeping panel.
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+        getWindow().addFlags(WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON);
+        getWindow().addFlags(WindowManager.LayoutParams.FLAG_DISMISS_KEYGUARD);
         getWindow().setFlags(
                 WindowManager.LayoutParams.FLAG_FULLSCREEN,
                 WindowManager.LayoutParams.FLAG_FULLSCREEN);
+        applyBrightness();
 
         FrameLayout root = new FrameLayout(this);
         root.setBackgroundColor(Color.BLACK);
+        root.setKeepScreenOn(true);
 
         // `--es address host:port` points the client at a publisher reached over
         // the LAN; without it the loopback default is adb's reverse tunnel.
@@ -127,6 +138,10 @@ public final class MainActivity extends Activity {
     protected void onResume() {
         super.onResume();
         surface.onResume();
+        // Re-applied on every resume: the brightness is a window attribute, and a
+        // trip through the background gives the policy manager a chance to hand
+        // the display back to the system curve.
+        applyBrightness();
         if (wifiLock != null && !wifiLock.isHeld()) {
             wifiLock.acquire();
             Log.i(TAG, "wifi high performance lock held");
@@ -170,6 +185,26 @@ public final class MainActivity extends Activity {
      */
     private void showStatus(boolean live) {
         status.setVisibility(live ? View.GONE : View.VISIBLE);
+    }
+
+    /**
+     * Pins this window's brightness at the top of the range.
+     *
+     * <p>A window brightness replaces the system curve rather than scaling it, so
+     * this holds the panel at full output and, more importantly, removes the step
+     * where the policy manager dims the display before sleeping it. The attribute
+     * is a float in 0..1, with -1 meaning "follow the system" — the default this
+     * replaces. It belongs to the window, so it lasts exactly as long as this
+     * activity is in front.
+     */
+    private void applyBrightness() {
+        WindowManager.LayoutParams attributes = getWindow().getAttributes();
+        if (attributes.screenBrightness == 1.0f) {
+            return;
+        }
+        attributes.screenBrightness = 1.0f;
+        getWindow().setAttributes(attributes);
+        Log.i(TAG, "window brightness pinned at 1.0");
     }
 
     private void hideSystemUi() {

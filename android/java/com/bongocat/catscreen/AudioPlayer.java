@@ -2,6 +2,7 @@ package com.bongocat.catscreen;
 
 import android.content.Context;
 import android.media.AudioAttributes;
+import android.media.AudioManager;
 import android.media.MediaPlayer;
 import android.util.Log;
 
@@ -29,11 +30,45 @@ final class AudioPlayer {
     private static final String TAG = "CatScreen";
 
     private final Context context;
+    private final AudioManager audio;
     private final Map<Integer, MediaPlayer> players = new HashMap<>();
     private int playing = -1;
+    /** Ids already reported as unloaded, so a missing clip logs once. */
+    private final java.util.Set<Integer> missing = new java.util.HashSet<>();
+    /** Set once the media stream has been aligned, after a clip actually played. */
+    private boolean volumeAligned;
 
     AudioPlayer(Context context) {
         this.context = context;
+        this.audio = (AudioManager) context.getSystemService(Context.AUDIO_SERVICE);
+    }
+
+    /**
+     * Raises the media stream the first time a clip plays.
+     *
+     * <p>Volume in this framework is indexed per output device, and this unit
+     * boots with {@code speaker: 1} while the default device sits at 8. The keys
+     * on the panel only move the device that is active at the time, so pressing
+     * volume up while nothing is playing adjusts a route the sounds never take.
+     * Calling this *after* {@code start()} is what makes the adjustment land on
+     * the speaker: by then the stream has been routed there.
+     */
+    private void alignVolume() {
+        if (audio == null || volumeAligned) {
+            return;
+        }
+        volumeAligned = true;
+        int maximum = audio.getStreamMaxVolume(AudioManager.STREAM_MUSIC);
+        if (maximum <= 0) {
+            return;
+        }
+        int current = audio.getStreamVolume(AudioManager.STREAM_MUSIC);
+        int target = Math.max(1, (maximum * 3) / 5);
+        Log.i(TAG, "media volume " + current + " of " + maximum + " while playing");
+        if (current < target) {
+            audio.setStreamVolume(AudioManager.STREAM_MUSIC, target, 0);
+            Log.i(TAG, "media stream raised " + current + " -> " + target);
+        }
     }
 
     /** Replaces the library. A clip that will not prepare is reported once. */
@@ -46,6 +81,12 @@ final class AudioPlayer {
             return;
         }
         for (int i = 0; i < count; i++) {
+            // The header of one entry has to fit before it can be read: a frame
+            // cut short by a dropped connection stops here instead of throwing.
+            if (offset < 0 || offset + 8 > payload.length) {
+                Log.w(TAG, "audio library ends after " + i + " of " + count + " clips");
+                return;
+            }
             int id = readLe32(payload, offset);
             offset += 4;
             int size = readLe32(payload, offset);
@@ -65,6 +106,7 @@ final class AudioPlayer {
                 players.put(id, player);
             }
         }
+        missing.clear();
         Log.i(TAG, "audio library: " + players.size() + " clips");
     }
 
@@ -72,6 +114,11 @@ final class AudioPlayer {
     void play(int id, float volume) {
         MediaPlayer player = players.get(id);
         if (player == null) {
+            // Once per id: a model whose sounds never arrived would otherwise fill
+            // the log at keystroke rate, and the first line already says it all.
+            if (missing.add(id)) {
+                Log.w(TAG, "clip " + id + " is not loaded (" + players.size() + " ready)");
+            }
             return;
         }
         stop();
@@ -80,6 +127,7 @@ final class AudioPlayer {
             player.seekTo(0);
             player.start();
             playing = id;
+            alignVolume();
         } catch (IllegalStateException error) {
             Log.w(TAG, "clip " + id + " would not start: " + error.getMessage());
             players.remove(id);
