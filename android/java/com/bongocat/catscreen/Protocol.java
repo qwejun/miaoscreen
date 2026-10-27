@@ -22,6 +22,27 @@ final class Protocol {
     static final int KIND_PREVIEW_CTRL = 0x15;
     /** One snapshot, device to host: a JPEG of this panel's framebuffer. */
     static final int KIND_PREVIEW_FRAME = 0x16;
+    /** The sounds the model can make, sent once per model generation. */
+    static final int KIND_AUDIO_LIBRARY = 0x17;
+    /** Play one clip from the library: `id`, `volume`. */
+    static final int KIND_AUDIO_PLAY = 0x18;
+    /** Stop whatever is playing. */
+    static final int KIND_AUDIO_STOP = 0x19;
+    /** Device to host: how many datagrams arrived, and whether to stop sending. */
+    static final int KIND_LINK_STATS = 0x1A;
+    /** Host to device: one frame number that was put on the datagram channel. */
+    static final int KIND_FRAME_MARK = 0x1B;
+
+    /** The four bytes every datagram begins with. */
+    static final byte[] DATAGRAM_MAGIC = {'M', 'C', 'A', 'T'};
+    /** `MAGIC` + `type: u8` + `version: u8` + `reserved: u16`. */
+    static final int DATAGRAM_HEADER_LEN = 8;
+    static final int DATAGRAM_REGISTER = 1;
+    static final int DATAGRAM_REGISTER_ACK = 2;
+    static final int DATAGRAM_FRAME_SLICE = 3;
+    static final int DATAGRAM_CLEAR = 4;
+    /** Frame payload bytes per datagram. Must match the publisher's constant. */
+    static final int DATAGRAM_PAYLOAD = 1180;
 
     static final int VERSION = 1;
 
@@ -55,6 +76,22 @@ final class Protocol {
 
         Reader(InputStream in) {
             this.in = in;
+        }
+
+        /**
+         * A reader over a body that has already been separated from its header.
+         *
+         * <p>Frames arrive as datagrams, where the {@code kind} and {@code length}
+         * were consumed by the assembler rather than by a socket read. The body is
+         * exactly what the control socket would have delivered after the five
+         * header bytes.
+         */
+        Reader(byte[] body, int kind) {
+            this.in = null;
+            this.payload = body;
+            this.position = 0;
+            this.limit = body.length;
+            this.kind = kind;
         }
 
         /** Blocks for the next message; returns false only on a clean close. */
@@ -112,6 +149,17 @@ final class Protocol {
         /** The whole payload; image decoders read straight out of it. */
         byte[] buffer() {
             return payload;
+        }
+
+        /** A copy of the payload that survives the next message. */
+        byte[] payloadCopy() {
+            byte[] copy = new byte[limit];
+            System.arraycopy(payload, 0, copy, 0, limit);
+            return copy;
+        }
+
+        int limit() {
+            return limit;
         }
 
         int position() {

@@ -367,6 +367,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     };
     let mut application = bongocat_app::Application::start(preset_root())?;
+    // Taken before the application is moved into the settings service: the
+    // publisher is created later, on the main thread, and this is the handle it
+    // attaches to so the model's sounds come out of the panel.
+    let product_audio = application.audio_sink();
     let application_log = application.log_handle();
     // The plugin service starts before the overlay, because the overlay is what
     // draws the layer the service composes: the window has to be handed the
@@ -564,7 +568,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         // trait object: it is the settings window that changes the
                         // strip later, and it needs a handle that outlives the
                         // render loop's ownership of the sink.
-                        device_link::ProductDeviceLink::install(cx, address, sink.handle());
+                        let handle = sink.handle();
+                        device_link::ProductDeviceLink::install(cx, address, handle.clone());
+                        // The panel is now the model's speaker. Until this point
+                        // the audio service has had nowhere to send anything,
+                        // which is what keeps a startup noise off the laptop.
+                        product_audio.attach(device_link::DeviceAudioSink::new(handle));
                         ProductOverlaySession::start_device(
                             runtime_client,
                             input_producer,

@@ -11,11 +11,45 @@
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
+use bongocat_audio::MotionAudioSink;
 use bongocat_magneo::protocol::Overlay;
 use bongocat_magneo::MagneoHandle;
 use bongocat_ui::{DeviceLink, DeviceOverlayConfig};
 use gpui_kit::App;
 use serde::{Deserialize, Serialize};
+
+/// The publisher as the model's audio destination.
+///
+/// The panel has the speaker the user is looking at, so the clips travel with the
+/// model and the play command travels as an index. Nothing is decoded on this
+/// side: the file bytes go over the wire as they are and the panel's own player
+/// takes them, which is what lets an unsupported format fail there once rather
+/// than decode here into something the wire would refuse.
+pub(crate) struct DeviceAudioSink {
+    handle: MagneoHandle,
+}
+
+impl DeviceAudioSink {
+    pub(crate) fn new(handle: MagneoHandle) -> Arc<dyn MotionAudioSink> {
+        Arc::new(Self { handle })
+    }
+}
+
+impl MotionAudioSink for DeviceAudioSink {
+    fn set_library(&self, clips: Vec<(u32, Vec<u8>)>) -> usize {
+        let offered = clips.len();
+        self.handle.set_audio_library(clips);
+        offered
+    }
+
+    fn play(&self, id: u32, volume: f32) {
+        self.handle.play_audio(id, volume);
+    }
+
+    fn stop(&self) {
+        self.handle.stop_audio();
+    }
+}
 
 /// The strip as it is stored on disk.
 ///

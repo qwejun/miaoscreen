@@ -43,6 +43,7 @@ mod client;
 mod command;
 mod diagnostics;
 mod error;
+mod remote;
 mod service;
 mod state;
 #[cfg(test)]
@@ -52,6 +53,7 @@ mod worker;
 
 pub(crate) use backend::AudioBackend;
 pub(crate) use backend::*;
+pub(crate) use remote::RemoteAudioBackend;
 pub(crate) use service::*;
 pub(crate) use worker::*;
 
@@ -61,6 +63,7 @@ pub use client::MotionAudioClient;
 pub use command::{MotionAudioCommand, MotionAudioPublishError};
 pub use diagnostics::MotionAudioDiagnostics;
 pub use error::{MotionAudioErrorCode, MotionAudioShutdownError, MotionAudioStartError};
+pub use remote::MotionAudioSink;
 pub use service::MotionAudioService;
 pub use state::{MotionAudioState, MotionAudioStopReason};
 pub use volume::MotionAudioVolume;

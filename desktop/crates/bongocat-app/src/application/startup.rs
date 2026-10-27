@@ -9,6 +9,7 @@ use super::Application;
 use crate::app_log::{
     ApplicationLogCode, ApplicationLogContext, ApplicationLogEvent, ApplicationLogHandle,
 };
+use crate::audio_link::ProductAudioSink;
 use crate::config_projection::{
     cursor_settings_from_config, gamepad_axis_settings_from_config, model_settings_from_config,
     overlay_settings_from_config, random_behavior_settings_from_config, runtime_log_settings,
@@ -28,6 +29,7 @@ use bongocat_model::{ModelId, ModelPackageLimits, PresetModelCatalog};
 use bongocat_model_store::{ModelStore, PresetCoverStore};
 use bongocat_runtime::{RuntimeCommand, RuntimeOwner};
 use std::path::Path;
+use std::sync::Arc;
 
 #[cfg(test)]
 use crate::tests::repository_preset_root;
@@ -224,8 +226,15 @@ impl Application {
         let config_revision = Some(loaded.revision);
         let configured_model = config.model.selected_model.as_ref();
         let shortcut_table = ShortcutTable::new(active_shortcuts(&config, configured_model)?);
-        let (motion_audio, motion_audio_client) =
-            match MotionAudioService::start(AUDIO_COMMAND_CAPACITY) {
+        // The model's voice belongs to the panel across the room, not to this
+        // machine's speakers. The destination does not exist yet — the publisher
+        // binds its port on the main thread, after this struct is built — so the
+        // service is started against a forwarding sink that is attached later.
+        let audio_sink = ProductAudioSink::new();
+        let (motion_audio, motion_audio_client) = match MotionAudioService::start_with_sink(
+            AUDIO_COMMAND_CAPACITY,
+            Arc::clone(&audio_sink) as Arc<dyn bongocat_audio::MotionAudioSink>,
+        ) {
                 Ok(service) => {
                     let client = service.client();
                     (Some(service), client)
@@ -335,6 +344,7 @@ impl Application {
             recorded_expression_sequence: None,
             runtime,
             motion_audio,
+            audio_sink,
             render_consumer,
             application_log,
             core_log_diagnostics: None,

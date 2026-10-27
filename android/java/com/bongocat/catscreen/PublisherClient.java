@@ -1,5 +1,6 @@
 package com.bongocat.catscreen;
 
+import android.content.Context;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.util.Log;
@@ -7,6 +8,7 @@ import android.util.Log;
 import java.io.BufferedInputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.io.OutputStream;
 import java.net.InetSocketAddress;
 import java.net.Socket;
 
@@ -14,17 +16,20 @@ import java.net.Socket;
  * Keeps one TCP connection to the publisher alive and hands finished frames to
  * the render thread.
  *
- * <p>The device reaches the publisher through {@code adb reverse tcp:7391
- * tcp:7391}, so the address is the device's own loopback. A dropped connection is
- * retried forever: the publisher is an ordinary desktop program and the USB cable
- * is allowed to be unplugged.
+ * <p>Two channels carry the stream. The control socket — this class — carries
+ * the handshake, the textures, the strip, the audio library and every command,
+ * because those are things a dropped byte has to be recovered from. Frames come
+ * over datagrams instead, through {@link UdpFrameChannel}: a frame is a complete
+ * state, so the newest one is the only one worth having, and a TCP stream of them
+ * over Wi-Fi queues the backlog in the access point until the picture on the
+ * panel is exactly as old as the network is slow.
  *
  * <p>Parsing happens here, never on the render thread. The two are decoupled by a
  * single copied frame: the render thread is allowed to be slower than the stream
  * and simply misses frames, which is what keeps the picture in step with the
  * newest state rather than falling behind by seconds.
  */
-final class PublisherClient implements Runnable {
+final class PublisherClient implements Runnable, UdpFrameChannel.Sink {
 
     interface Listener {
         void onStatus(String text, boolean live);
@@ -46,6 +51,28 @@ final class PublisherClient implements Runnable {
      */
     private static final int READ_TIMEOUT_MS = 4000;
 
+    /** How often the host is told what arrived. */
+    private static final long STATS_INTERVAL_MS = 2000;
+
+    /**
+     * How far behind the host's frame number the datagrams may fall before the
+     * channel is judged broken.
+     *
+     * <p>The host marks one frame a second, so this is measured in received
+     * frames rather than in time: a link that drops the occasional datagram still
+     * delivers most frames, and one that delivers none is unambiguous.
+     */
+    private static final long MARK_LAG_LIMIT = 10;
+
+    /** How long after a bad mark the datagram channel is declared dead. */
+    private static final long DATAGRAM_SILENCE_MS = 1500;
+
+    /** How long the datagram channel is left alone before being tried again. */
+    private static final long DATAGRAM_RETRY_MS = 30_000;
+
+    /** How many times a failed datagram channel is retried in one connection. */
+    private static final int DATAGRAM_RETRIES = 3;
+
     private final Object lock = new Object();
     private final Frame shared = new Frame();
 
@@ -53,12 +80,13 @@ final class PublisherClient implements Runnable {
      * a LAN address covers the case where adb's tunnel is unavailable. */
     private final String address;
 
-    PublisherClient() {
-        this(DEFAULT_ADDRESS);
-    }
+    private final UdpFrameChannel datagrams;
+    private final AudioPlayer audio;
 
-    PublisherClient(String address) {
+    PublisherClient(Context context, String address) {
         this.address = address != null ? address : DEFAULT_ADDRESS;
+        this.datagrams = new UdpFrameChannel(this);
+        this.audio = new AudioPlayer(context);
     }
 
     private Scene pendingScene;
@@ -82,6 +110,26 @@ final class PublisherClient implements Runnable {
      * stream the reader is parsing on the other thread.
      */
     private final Object sendLock = new Object();
+
+    /**
+     * The newest frame already handed to the render thread.
+     *
+     * <p>Two channels deliver frames and either may be ahead of the other: while
+     * the datagram path is warming up the host is still writing frames to the
+     * control socket, and those are older than the datagrams already assembled.
+     * Sequence numbers are monotonic within a model generation, so this is what
+     * keeps a stale picture from overwriting a fresh one.
+     */
+    private long lastGeneration = -1;
+    private long lastSequence = -1;
+
+    private volatile long lastMarkAt;
+    private volatile long lastMarkSequence = -1;
+    private volatile long lastDatagramFrameAt;
+    private volatile long lastDatagramSequence = -1;
+    private volatile boolean datagramSuspended;
+    private volatile long datagramSuspendedAt;
+    private volatile int datagramFailures;
 
     void setListener(Listener listener) {
         this.listener = listener;
@@ -131,6 +179,11 @@ final class PublisherClient implements Runnable {
         return previewRequested;
     }
 
+    /** Whether frames are currently arriving as datagrams. */
+    boolean isDatagramChannelActive() {
+        return datagrams.isRegistered() && !datagramSuspended;
+    }
+
     /**
      * Sends one snapshot to the host.
      *
@@ -140,29 +193,37 @@ final class PublisherClient implements Runnable {
      * next snapshot will try again, and the reader will notice a dead link first.
      */
     void sendPreview(byte[] jpeg) {
+        if (jpeg == null || jpeg.length == 0) {
+            return;
+        }
+        byte[] payload = new byte[8 + jpeg.length];
+        writeLe32(payload, 0, Protocol.VERSION);
+        writeLe32(payload, 4, jpeg.length);
+        System.arraycopy(jpeg, 0, payload, 8, jpeg.length);
+        send(Protocol.KIND_PREVIEW_FRAME, payload);
+    }
+
+    /** Sends one message on the control socket, or drops it when there is none. */
+    private void send(int kind, byte[] payload) {
         Socket current = socket;
-        if (current == null || jpeg == null || jpeg.length == 0) {
+        if (current == null) {
             return;
         }
         synchronized (sendLock) {
             try {
-                java.io.OutputStream out = current.getOutputStream();
+                OutputStream out = current.getOutputStream();
                 byte[] header = new byte[5];
-                header[0] = (byte) Protocol.KIND_PREVIEW_FRAME;
-                int length = 8 + jpeg.length;
+                header[0] = (byte) kind;
+                int length = payload.length;
                 header[1] = (byte) (length & 0xFF);
                 header[2] = (byte) ((length >>> 8) & 0xFF);
                 header[3] = (byte) ((length >>> 16) & 0xFF);
                 header[4] = (byte) ((length >>> 24) & 0xFF);
                 out.write(header);
-                byte[] head = new byte[8];
-                writeLe32(head, 0, Protocol.VERSION);
-                writeLe32(head, 4, jpeg.length);
-                out.write(head);
-                out.write(jpeg);
+                out.write(payload);
                 out.flush();
             } catch (IOException error) {
-                Log.w(TAG, "snapshot dropped: " + error.getMessage());
+                Log.w(TAG, "message dropped: " + error.getMessage());
             }
         }
     }
@@ -176,20 +237,27 @@ final class PublisherClient implements Runnable {
 
     void stop() {
         running = false;
+        datagrams.stop();
+        audio.releaseAll();
         closeQuietly(socket);
         socket = null;
     }
 
     @Override
     public void run() {
+        long lastStats = 0;
         while (running) {
             Socket connection = new Socket();
+            InetSocketAddress endpoint = parseAddress(address);
             try {
-                connection.connect(parseAddress(address), CONNECT_TIMEOUT_MS);
+                connection.connect(endpoint, CONNECT_TIMEOUT_MS);
                 connection.setTcpNoDelay(true);
                 connection.setSoTimeout(READ_TIMEOUT_MS);
                 socket = connection;
                 publish("connected", false);
+                // The datagram channel is per connection: a new control socket
+                // means the host may be a different process on a different port.
+                datagrams.open(endpoint.getHostString(), datagramPort(endpoint.getPort()));
                 read(connection);
                 publish("publisher closed the connection", false);
             } catch (IOException error) {
@@ -220,6 +288,7 @@ final class PublisherClient implements Runnable {
         InputStream raw = new BufferedInputStream(connection.getInputStream(), 64 * 1024);
         Protocol.Reader reader = new Protocol.Reader(raw);
         boolean live = false;
+        long lastStats = System.currentTimeMillis();
 
         while (running && reader.next()) {
             switch (reader.kind) {
@@ -238,12 +307,9 @@ final class PublisherClient implements Runnable {
                     }
                     break;
                 case Protocol.KIND_FRAME:
-                    synchronized (lock) {
-                        shared.read(reader);
-                        hasFrame = true;
-                        cleared = false;
-                    }
-                    if (!live) {
+                    // The control socket still carries frames until the host has
+                    // heard from this device, and again if it stops doing so.
+                    if (applyFrame(reader.payloadCopy())) {
                         live = true;
                         publish("live", true);
                     }
@@ -252,16 +318,32 @@ final class PublisherClient implements Runnable {
                     if (reader.u32() != Protocol.VERSION) {
                         throw new IOException("clear carries an unknown version");
                     }
-                    synchronized (lock) {
-                        hasFrame = false;
-                        cleared = true;
-                    }
+                    clearFrame();
                     break;
                 case Protocol.KIND_OVERLAY:
                     Overlay overlay = Overlay.read(reader);
                     synchronized (lock) {
                         pendingOverlay = overlay;
                     }
+                    break;
+                case Protocol.KIND_AUDIO_LIBRARY:
+                    readAudioLibrary(reader);
+                    break;
+                case Protocol.KIND_AUDIO_PLAY:
+                    if (reader.u32() != Protocol.VERSION) {
+                        throw new IOException("audio play carries an unknown version");
+                    }
+                    audio.play(reader.u32(), reader.f32());
+                    break;
+                case Protocol.KIND_AUDIO_STOP:
+                    if (reader.u32() != Protocol.VERSION) {
+                        throw new IOException("audio stop carries an unknown version");
+                    }
+                    audio.stop();
+                    break;
+                case Protocol.KIND_FRAME_MARK:
+                    lastMarkAt = System.currentTimeMillis();
+                    lastMarkSequence = reader.u64();
                     break;
                 case Protocol.KIND_PREVIEW_CTRL:
                     if (reader.u32() != Protocol.VERSION) {
@@ -272,7 +354,132 @@ final class PublisherClient implements Runnable {
                 default:
                     break;
             }
+            long now = System.currentTimeMillis();
+            if (now - lastStats >= STATS_INTERVAL_MS) {
+                lastStats = now;
+                reportLink(now);
+            }
         }
+    }
+
+    /**
+     * Decides whether the datagram channel is still worth asking the host for.
+     *
+     * <p>A datagram that never arrives looks exactly like a host with nothing to
+     * draw, so the only evidence available is the host's own frame number: if it
+     * keeps advancing and the frames here do not, the path is broken and the
+     * control socket is asked to take over. The request is repeated until either
+     * frames start arriving or the retries run out.
+     */
+    private void reportLink(long now) {
+        boolean markFresh = lastMarkAt > 0 && now - lastMarkAt < 5000;
+        boolean behind = markFresh
+                && lastMarkSequence - lastDatagramSequence > MARK_LAG_LIMIT
+                && now - lastDatagramFrameAt > DATAGRAM_SILENCE_MS;
+
+        if (behind && !datagramSuspended) {
+            datagramSuspended = true;
+            datagramSuspendedAt = now;
+            datagramFailures++;
+            datagrams.suspend();
+            Log.w(TAG, "datagram channel idle while the host counts "
+                    + lastMarkSequence + "; asking for the control socket");
+        } else if (datagramSuspended
+                && now - datagramSuspendedAt > DATAGRAM_RETRY_MS
+                && datagramFailures <= DATAGRAM_RETRIES) {
+            // Try again after a cooling-off period. Without this a network that
+            // only blocked datagrams for a moment would leave the panel on the
+            // slow path until the app was restarted.
+            datagramSuspended = false;
+            datagramSuspendedAt = now;
+            datagrams.resume();
+            Log.i(TAG, "retrying the datagram channel");
+        }
+
+        byte[] payload = new byte[21];
+        writeLe32(payload, 0, Protocol.VERSION);
+        putLe64(payload, 4, datagrams.framesAssembled());
+        putLe64(payload, 12, datagrams.slicesReceived());
+        payload[20] = (byte) (datagramSuspended ? 1 : 0);
+        send(Protocol.KIND_LINK_STATS, payload);
+    }
+
+    private static void putLe64(byte[] target, int offset, long value) {
+        for (int i = 0; i < 8; i++) {
+            target[offset + i] = (byte) ((value >>> (8 * i)) & 0xFF);
+        }
+    }
+
+    /**
+     * Applies one frame payload.
+     *
+     * <p>Returns whether the panel now has something new to draw. Both channels
+     * call this, so the sequence check is what keeps the slower one from
+     * overwriting the faster one's work.
+     */
+    private boolean applyFrame(byte[] payload) {
+        if (payload.length < 20) {
+            return false;
+        }
+        long generation = readLe64(payload, 4);
+        long sequence = readLe64(payload, 12);
+        synchronized (lock) {
+            if (generation == lastGeneration && sequence <= lastSequence) {
+                return false;
+            }
+            lastGeneration = generation;
+            lastSequence = sequence;
+            try {
+                shared.read(new Protocol.Reader(payload, Protocol.KIND_FRAME));
+                hasFrame = true;
+                cleared = false;
+            } catch (IOException error) {
+                Log.w(TAG, "frame rejected: " + error.getMessage());
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private void clearFrame() {
+        synchronized (lock) {
+            hasFrame = false;
+            cleared = true;
+        }
+    }
+
+    private void readAudioLibrary(Protocol.Reader reader) throws IOException {
+        reader.u32();
+        int count = reader.bounded(256);
+        byte[] payload = reader.payloadCopy();
+        // The audio player walks the same payload with explicit offsets: it needs
+        // the raw bytes to write each clip, and the reader's cursor belongs to the
+        // socket parse rather than to the file copy.
+        int offset = Math.min(reader.limit(), 8);
+        audio.setLibrary(payload, offset, count);
+    }
+
+    // UdpFrameChannel.Sink
+
+    @Override
+    public void onFrame(byte[] payload, long channelSequence) {
+        lastDatagramFrameAt = System.currentTimeMillis();
+        lastDatagramSequence = Math.max(lastDatagramSequence, channelSequence);
+        if (applyFrame(payload)) {
+            publish("live", true);
+        }
+    }
+
+    @Override
+    public void onClear(long channelSequence) {
+        lastDatagramFrameAt = System.currentTimeMillis();
+        lastDatagramSequence = Math.max(lastDatagramSequence, channelSequence);
+        clearFrame();
+    }
+
+    @Override
+    public void onRegistered() {
+        Log.i(TAG, "host acknowledged this device's datagram channel");
     }
 
     private static void readHello(Protocol.Reader reader) throws IOException {
@@ -351,6 +558,24 @@ final class PublisherClient implements Runnable {
                     + ", expected " + width + "x" + height);
         }
         return bitmap;
+    }
+
+    /** The datagram port that belongs to a control port. */
+    private static int datagramPort(int controlPort) {
+        return controlPort >= 65535 ? controlPort : controlPort + 1;
+    }
+
+    private static long readLe64(byte[] source, int offset) {
+        long low = readLe32(source, offset) & 0xFFFFFFFFL;
+        long high = readLe32(source, offset + 4) & 0xFFFFFFFFL;
+        return (high << 32) | low;
+    }
+
+    private static int readLe32(byte[] source, int offset) {
+        return (source[offset] & 0xFF)
+                | ((source[offset + 1] & 0xFF) << 8)
+                | ((source[offset + 2] & 0xFF) << 16)
+                | ((source[offset + 3] & 0xFF) << 24);
     }
 
     /** Splits {@code host:port} (or bare {@code host}) into an endpoint. */

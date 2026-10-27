@@ -9,6 +9,7 @@
 //! own module. The public surface is exactly what it was.
 
 use crate::ApplicationError;
+use crate::audio_link::ProductAudioSink;
 use crate::app_log::{
     ApplicationLogHandle, ApplicationPanicHook, ApplicationRunMarker, CoreLogDiagnostics,
 };
@@ -70,6 +71,9 @@ pub struct Application {
     recorded_expression_sequence: Option<u64>,
     runtime: RuntimeOwner,
     motion_audio: Option<MotionAudioService>,
+    /// Where the model's sounds go. The publisher attaches to it once the port
+    /// it serves is bound, which happens after this struct exists.
+    audio_sink: Arc<ProductAudioSink>,
     render_consumer: Option<RenderConsumer>,
     application_log: ApplicationLogHandle,
     core_log_diagnostics: Option<Arc<dyn Fn() -> CoreLogDiagnostics + Send + Sync>>,
@@ -83,6 +87,11 @@ pub struct Application {
 impl Application {
     pub fn runtime_client(&self) -> RuntimeClient {
         self.runtime.client()
+    }
+
+    /// The audio path, for the publisher to attach itself to.
+    pub fn audio_sink(&self) -> Arc<ProductAudioSink> {
+        Arc::clone(&self.audio_sink)
     }
 
     pub fn config_revision(&self) -> Option<u64> {

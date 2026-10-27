@@ -43,6 +43,54 @@ pub const KIND_OVERLAY: u8 = 0x14;
 pub const KIND_PREVIEW_CTRL: u8 = 0x15;
 /// One snapshot from device to host: a JPEG of the panel's own framebuffer.
 pub const KIND_PREVIEW_FRAME: u8 = 0x16;
+/// The sounds the model can make, sent once per model generation.
+///
+/// The panel has its own speaker and the desktop has none worth using for a
+/// device that sits across the room, so the clips travel with the textures and
+/// the play command travels as an index. Sending a file per keystroke would put
+/// a hundred kilobytes on the link for a noise that lasts a tenth of a second.
+pub const KIND_AUDIO_LIBRARY: u8 = 0x17;
+/// Play one clip from the library: `id`, `volume`.
+pub const KIND_AUDIO_PLAY: u8 = 0x18;
+/// Stop whatever is playing.
+pub const KIND_AUDIO_STOP: u8 = 0x19;
+/// Device to host: how often frames arrived as datagrams, so the host can fall
+/// back to the control socket when the datagram path is not working.
+pub const KIND_LINK_STATS: u8 = 0x1A;
+/// Host to device: one frame number that was put on the datagram channel.
+///
+/// One of these a second is enough for the device to notice that it is missing
+/// the pictures entirely. It is the only thing the device cannot work out on its
+/// own: a datagram that never arrives is indistinguishable from a host that has
+/// nothing to draw.
+pub const KIND_FRAME_MARK: u8 = 0x1B;
+
+/// The four bytes every datagram begins with, so a stray packet — or an old
+/// client still speaking the previous protocol — is dropped instead of parsed.
+pub const DATAGRAM_MAGIC: [u8; 4] = *b"MCAT";
+/// `MAGIC` + `type: u8` + `version: u8` + `reserved: u16`.
+pub const DATAGRAM_HEADER_LEN: usize = 8;
+/// The bytes of frame payload one datagram carries.
+///
+/// Chosen below the smallest path MTU this device is likely to see (1280 on
+/// IPv6, 1500 over Ethernet and Wi-Fi) so one frame never depends on IP
+/// fragmentation: a datagram split by the router loses the whole frame when any
+/// fragment is lost, and the panel cannot retransmit what it never knew about.
+pub const DATAGRAM_PAYLOAD: usize = 1180;
+
+pub const DATAGRAM_REGISTER: u8 = 1;
+pub const DATAGRAM_REGISTER_ACK: u8 = 2;
+pub const DATAGRAM_FRAME_SLICE: u8 = 3;
+pub const DATAGRAM_CLEAR: u8 = 4;
+
+/// The stats a device reports about the datagram channel.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct LinkStats {
+    /// Complete frames the device assembled from datagrams.
+    pub frames: u64,
+    /// Datagrams the device received, complete or not.
+    pub slices: u64,
+}
 
 const BLEND_NORMAL: u8 = 0;
 const BLEND_ADDITIVE: u8 = 1;
@@ -479,4 +527,120 @@ fn write_drawable(writer: &mut Writer, drawable: &DrawableSnapshot) {
     for index in &drawable.indices {
         writer.u16(*index);
     }
+}
+
+/// Every sound the active model can make: `id`, length, bytes.
+///
+/// Ids are the publisher's own numbering and are stable for the life of the
+/// connection; the panel keeps the file on disk under that number and plays it by
+/// index. Nothing here is decoded on this side, so a format the panel cannot play
+/// is a load failure there rather than a silent gap here.
+pub fn audio_library(clips: &[(u32, Vec<u8>)]) -> Vec<u8> {
+    let mut writer = Writer::new();
+    writer.u32(PROTOCOL_VERSION);
+    writer.u32(u32::try_from(clips.len()).unwrap_or(u32::MAX));
+    for (id, bytes) in clips {
+        writer.u32(*id);
+        writer.u32(u32::try_from(bytes.len()).unwrap_or(u32::MAX));
+        writer.raw(bytes);
+    }
+    writer.message(KIND_AUDIO_LIBRARY)
+}
+
+/// Play one clip. `volume` is 0..=1, the same scale the desktop mixer uses.
+pub fn audio_play(id: u32, volume: f32) -> Vec<u8> {
+    let mut writer = Writer::new();
+    writer.u32(PROTOCOL_VERSION);
+    writer.u32(id);
+    writer.f32(volume.clamp(0.0, 1.0));
+    writer.message(KIND_AUDIO_PLAY)
+}
+
+pub fn audio_stop() -> Vec<u8> {
+    let mut writer = Writer::new();
+    writer.u32(PROTOCOL_VERSION);
+    writer.message(KIND_AUDIO_STOP)
+}
+
+/// One frame number the host has committed to the datagram channel.
+pub fn frame_mark(channel_sequence: u64) -> Vec<u8> {
+    let mut writer = Writer::new();
+    writer.u32(PROTOCOL_VERSION);
+    writer.u64(channel_sequence);
+    writer.message(KIND_FRAME_MARK)
+}
+
+/// The datagram that announces this device to the host, and the one that answers
+/// it. Both carry the nonce so a device can tell its own answer from a broadcast
+/// from a second host on the same network.
+pub fn datagram_register(nonce: u64) -> Vec<u8> {
+    let mut out = Vec::with_capacity(DATAGRAM_HEADER_LEN + 8);
+    out.extend_from_slice(&DATAGRAM_MAGIC);
+    out.push(DATAGRAM_REGISTER);
+    out.push(PROTOCOL_VERSION as u8);
+    out.extend_from_slice(&[0, 0]);
+    out.extend_from_slice(&nonce.to_le_bytes());
+    out
+}
+
+pub fn datagram_register_ack(nonce: u64) -> Vec<u8> {
+    let mut out = datagram_register(nonce);
+    out[4] = DATAGRAM_REGISTER_ACK;
+    out
+}
+
+/// Erase the panel, on the datagram channel.
+pub fn datagram_clear(channel_sequence: u64) -> Vec<u8> {
+    let mut out = Vec::with_capacity(DATAGRAM_HEADER_LEN + 8);
+    out.extend_from_slice(&DATAGRAM_MAGIC);
+    out.push(DATAGRAM_CLEAR);
+    out.push(PROTOCOL_VERSION as u8);
+    out.extend_from_slice(&[0, 0]);
+    out.extend_from_slice(&channel_sequence.to_le_bytes());
+    out
+}
+
+/// The nonce carried by a `REGISTER` or `REGISTER_ACK` datagram, or `None` when
+/// the packet is not one of ours.
+pub fn parse_datagram_register(packet: &[u8], kind: u8) -> Option<u64> {
+    if packet.len() != DATAGRAM_HEADER_LEN + 8 {
+        return None;
+    }
+    if packet[..4] != DATAGRAM_MAGIC || packet[4] != kind {
+        return None;
+    }
+    if u32::from(packet[5]) != PROTOCOL_VERSION {
+        return None;
+    }
+    Some(u64::from_le_bytes(packet[8..16].try_into().ok()?))
+}
+
+/// One frame, cut into datagrams the link will not fragment.
+///
+/// Each slice repeats the frame's total length so the device can reject a slice
+/// that does not fit the assembly it has started, and the count so it knows when
+/// to stop waiting. Every slice carries the same channel sequence, which is what
+/// makes a frame that lost a slice distinguishable from the frame after it.
+pub fn datagram_frame(channel_sequence: u64, payload: &[u8]) -> Vec<Vec<u8>> {
+    let total = payload.len();
+    let slices = total.div_ceil(DATAGRAM_PAYLOAD).max(1);
+    let count = u16::try_from(slices).unwrap_or(u16::MAX);
+    let mut out = Vec::with_capacity(slices);
+    for index in 0..slices {
+        let start = index * DATAGRAM_PAYLOAD;
+        let end = (start + DATAGRAM_PAYLOAD).min(total);
+        let body = &payload[start..end];
+        let mut packet = Vec::with_capacity(DATAGRAM_HEADER_LEN + 16 + body.len());
+        packet.extend_from_slice(&DATAGRAM_MAGIC);
+        packet.push(DATAGRAM_FRAME_SLICE);
+        packet.push(PROTOCOL_VERSION as u8);
+        packet.extend_from_slice(&[0, 0]);
+        packet.extend_from_slice(&channel_sequence.to_le_bytes());
+        packet.extend_from_slice(&(total as u32).to_le_bytes());
+        packet.extend_from_slice(&(u16::try_from(index).unwrap_or(0)).to_le_bytes());
+        packet.extend_from_slice(&count.to_le_bytes());
+        packet.extend_from_slice(body);
+        out.push(packet);
+    }
+    out
 }

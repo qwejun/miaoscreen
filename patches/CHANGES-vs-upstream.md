@@ -6,6 +6,7 @@
 | 日期 | 范围 |
 | --- | --- |
 | 2026-10-27 | 圆屏页、实时预览、开机提权、去掉桌面窗口设置 |
+| 2026-10-27 | 帧改走 UDP 数据报、模型音效改由圆屏播放、屏端 Wi-Fi 高性能锁 |
 
 ## 新增
 
@@ -15,13 +16,18 @@
 | `desktop/crates/bongocat-ui/src/window/device_page.rs` | 圆屏页的视图状态与 `DeviceLink` trait。界面层不依赖发布端，只认这一个 trait，避免两个 crate 互相依赖。 |
 | `android/java/com/bongocat/catscreen/Overlay.java` | 圆屏底部信息条的模型：带高、底色、若干行（模板/字号/颜色/对齐/字重/字体/中心 Y）。 |
 | `android/res/values/strings.xml` | 设备端文案。 |
+| `android/java/com/bongocat/catscreen/UdpFrameChannel.java` | 帧通道：每秒向主机播报一次自己的数据报端口，按 `channel_seq` 重组分片，缺片即丢弃。另有 `LINK_STATS` 回报收到的帧数与是否要求回退 TCP。 |
+| `android/java/com/bongocat/catscreen/AudioPlayer.java` | 把主机发来的音频库落到 `cacheDir/clips/clip-<id>`，用 `MediaPlayer` 预加载并按 id 播放；一条 clip 一个播放器，避免每次敲键都 prepare。 |
+| `desktop/crates/bongocat-audio/src/remote.rs` | `MotionAudioSink` trait 与 `RemoteAudioBackend`：把「播这个文件」转发给圆屏，本机扬声器不再出声。`prepare` 不解码，只读字节。 |
+| `desktop/crates/bongocat-app/src/audio_link.rs` | `ProductAudioSink`：音频服务先起来、发布端后创建，中间用这个可后挂的转发器接上。未挂载时全部调用为 no-op。 |
+| `scripts/dev/udp-probe.py` | 假主机，用来单独验证数据报通道与分片重组，不依赖产品。 |
 
 ## 修改
 
 | 文件 | 改动 |
 | --- | --- |
 | `desktop/crates/bongocat-magneo/src/protocol.rs` | 增加 `0x14 OVERLAY`、`0x15 PREVIEW_CTRL`、`0x16 PREVIEW_FRAME`；`Overlay::default_strip()` 给出一条默认信息条；canvas 边界改为无条件发送（原先只在有背景图时发，桌面/键盘模式会被裁）。 |
-| `desktop/crates/bongocat-magneo/src/sink.rs` | `Slot` 增加条带与预览状态、`MagneoHandle`（可克隆句柄）、连接时补发条带；`accept` 后的 socket 显式 `set_nonblocking(false)`（继承来的非阻塞会让每次写都返回 `WouldBlock`）；独立的读线程收快照，`MAX_INBOUND_MESSAGE = 4 MiB`。 |
+| `desktop/crates/bongocat-magneo/src/sink.rs` | `Slot` 增加条带与预览状态、`MagneoHandle`（可克隆句柄）、连接时补发条带；`accept` 后的 socket 显式 `set_nonblocking(false)`（继承来的非阻塞会让每次写都返回 `WouldBlock`）；独立的读线程收快照，`MAX_INBOUND_MESSAGE = 4 MiB`。帧改走 UDP：控制端口 + 1 上绑数据报 socket，收到屏的播报后帧按 1180 字节切片发出，3 秒没播报就退回 TCP；`CLEAR` 在无帧期间每 400 ms 重发一次，因为丢一个 clear 会留下旧画面。`wait_after` 改成 200 ms 上限的等待，循环靠它重读 peer 与计时器。 |
 | `desktop/crates/bongocat-app/src/main.rs` | 启动时先做一次提权（`runas`），同意后退出本进程、由提权副本接管；`--device-screen` 绑定端口；`--device-page-smoke`。 |
 | `desktop/crates/bongocat-app/src/product_options.rs` | 新增 `--device-screen`（隐藏）、`--device-page-smoke`。 |
 | `desktop/crates/bongocat-platform/src/startup_permission.rs` | `process_is_elevated()` / `relaunch_elevated()`（`ShellExecuteW` + `runas`）；Windows 的「权限流程」从打开文件夹改成重新以管理员启动。 |
@@ -37,10 +43,18 @@
 | `0x14` | 主机 → 屏 | `u32 版本 + Overlay`（带高、颜色、行模板） |
 | `0x15` | 主机 → 屏 | `u32 版本 + u8 开关` — 要不要回传画面 |
 | `0x16` | 屏 → 主机 | `u32 版本 + u32 长度 + JPEG` |
+| `0x17` | 主机 → 屏 | `u32 版本 + u32 条数 + N×(u32 id + u32 长度 + 字节)` — 音频库，每个模型代际发一次 |
+| `0x18` | 主机 → 屏 | `u32 版本 + u32 id + f32 音量` |
+| `0x19` | 主机 → 屏 | `u32 版本` |
+| `0x1A` | 屏 → 主机 | `u32 版本 + u64 完整帧数 + u64 数据报数 + u8 是否要求改走 TCP` |
+| `0x1B` | 主机 → 屏 | `u32 版本 + u64 帧序号` — 每秒一个，屏靠它发现自己收不到数据报 |
+
+数据报是独立格式，不复用 `kind + length`：`"MCAT" + u8 类型 + u8 版本 + u16 保留`，其后按类型带 `nonce`（注册/应答）、`channel_seq + 总长 + 片序 + 片数 + 字节`（帧片）或 `channel_seq`（清除）。切片载荷 1180 字节，低于常见 MTU，避免 IP 分片。
 
 模板占位符 `{HH} {mm} {ss} {yyyy} {MM} {dd} {W}` 在屏上展开，断链后时钟继续走，也不占带宽。
 
 ## 未做
 
 - 圆屏页面里的条带设置改动即刻生效，但**字体**仍是屏端内置的两款（`NotoSansHans`、`FZLanTYJW`），桌面端没有做字体下发。
+- 音频库每次连接、每次换模型都全量重传。改成内容哈希寻址（主机发 manifest、屏回报缺哪些）后重连就只剩握手，属下一步。
 - `hold_modifier`（长按修饰键才能交互）的整套录制控件仍留在 `bongocat-ui` 里，界面已经不再引用它，因此编译时有 dead-code 告警；删除它要连同 `window/tests/hold_modifier.rs` 一起处理，留作后续。

@@ -45,6 +45,21 @@ impl MotionAudioService {
         Self::start_with_backend(command_capacity, Box::<SystemAudioBackend>::default())
     }
 
+    /// Start a service that plays through `sink` instead of the sound card.
+    ///
+    /// The product hands the model's sounds to the panel, which has the speaker
+    /// the user is looking at. Everything else — ordering, overflow, shutdown —
+    /// is the same code path as the local device.
+    pub fn start_with_sink(
+        command_capacity: usize,
+        sink: Arc<dyn MotionAudioSink>,
+    ) -> Result<Self, MotionAudioStartError> {
+        Self::start_with_backend(
+            command_capacity,
+            Box::new(RemoteAudioBackend::new(sink)),
+        )
+    }
+
     pub(crate) fn start_with_backend(
         command_capacity: usize,
         backend: Box<dyn AudioBackend>,

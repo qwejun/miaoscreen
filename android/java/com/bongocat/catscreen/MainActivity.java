@@ -1,7 +1,9 @@
 package com.bongocat.catscreen;
 
 import android.app.Activity;
+import android.content.Context;
 import android.graphics.Color;
+import android.net.wifi.WifiManager;
 import android.opengl.GLSurfaceView;
 import android.os.Build;
 import android.os.Bundle;
@@ -32,6 +34,15 @@ public final class MainActivity extends Activity {
     private TextView status;
     private PublisherClient client;
     private Thread clientThread;
+    /**
+     * Keeps the radio out of power save.
+     *
+     * <p>A station that sleeps is served on a beacon, so the access point holds
+     * every frame until the next delivery window. Nothing is lost, every counter
+     * on the link says it is healthy, and the picture is a third of a second
+     * behind. This lock is the only thing on this side that turns that off.
+     */
+    private WifiManager.WifiLock wifiLock;
 
     @Override
     protected void onCreate(Bundle savedState) {
@@ -47,7 +58,14 @@ public final class MainActivity extends Activity {
 
         // `--es address host:port` points the client at a publisher reached over
         // the LAN; without it the loopback default is adb's reverse tunnel.
-        client = new PublisherClient(getIntent().getStringExtra("address"));
+        WifiManager wifi = (WifiManager) getApplicationContext()
+                .getSystemService(Context.WIFI_SERVICE);
+        if (wifi != null) {
+            wifiLock = wifi.createWifiLock(WifiManager.WIFI_MODE_FULL_HIGH_PERF, "CatScreen:frame");
+            wifiLock.setReferenceCounted(false);
+        }
+
+        client = new PublisherClient(this, getIntent().getStringExtra("address"));
 
         surface = new GLSurfaceView(this);
         surface.setEGLContextClientVersion(2);
@@ -109,12 +127,19 @@ public final class MainActivity extends Activity {
     protected void onResume() {
         super.onResume();
         surface.onResume();
+        if (wifiLock != null && !wifiLock.isHeld()) {
+            wifiLock.acquire();
+            Log.i(TAG, "wifi high performance lock held");
+        }
         hideSystemUi();
     }
 
     @Override
     protected void onPause() {
         surface.onPause();
+        if (wifiLock != null && wifiLock.isHeld()) {
+            wifiLock.release();
+        }
         super.onPause();
     }
 
