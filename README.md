@@ -9,12 +9,29 @@
 
 不打算自己编译就看 [Releases](https://github.com/qwejun/miaoscreen/releases/latest)：
 
-- `MiaoScreen-*-windows-x64.zip` — PC 端。解压到任意目录，双击 `MiaoScreen.exe`。
+- `MiaoScreen-*-windows-x64.zip` — PC 端。解压到任意目录，双击 `MiaoScreen-*.exe`。
   压缩包里的 `resources/models/` 和 `vcruntime140.dll` 必须和 exe 放在一起，缺了就打不开。
 - `CatScreen-*-android.apk` — 圆屏端，`adb install -r`，或拷到设备上直接点安装（需允许未知来源）。
 
 PC 端要求 Windows 10 以上（用 D3D11 + DirectWrite）。不需要装 .NET，也不需要管理员权限。
 安卓端 `minSdkVersion 22`，Android 5.1 以上。
+
+## 版本号
+
+硬盘上同时躺着几个版本时，靠这几处分辨：
+
+| 位置 | 样子 |
+| --- | --- |
+| 文件 | `MiaoScreen-0.1.1.exe` |
+| 设置窗口标题栏 | `喵屏设置 0.1.1` |
+| 托盘图标悬停 | `喵屏 0.1.1` |
+| exe 属性 → 详细信息 | 文件版本 `0.1.1`、产品名 `MiaoScreen` |
+| 设置 → 关于 | `MiaoScreen` / `版本 0.1.1` |
+
+版本号只有一个来源：`desktop/Cargo.toml` 的 `[workspace.package] version`
+（Windows 资源里的 `FILEVERSION` 由 `build.rs` 从 `CARGO_PKG_VERSION` 注入，窗口标题和托盘
+提示读同一个常量）。设备端是 `android/AndroidManifest.xml` 的 `versionName` / `versionCode`，
+两者互不依赖，发版时一起改。
 
 ## 结构
 

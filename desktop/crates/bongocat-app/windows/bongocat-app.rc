@@ -22,12 +22,12 @@ BEGIN
     BEGIN
         BLOCK "040904b0"
         BEGIN
-            VALUE "CompanyName", "ayangweb\0"
-            VALUE "FileDescription", "BongoCat\0"
+            VALUE "CompanyName", "MiaoScreen\0"
+            VALUE "FileDescription", "MiaoScreen\0"
             VALUE "FileVersion", VERSION "\0"
-            VALUE "InternalName", "bongocat-app\0"
-            VALUE "OriginalFilename", "bongocat-app.exe\0"
-            VALUE "ProductName", "BongoCat\0"
+            VALUE "InternalName", "MiaoScreen\0"
+            VALUE "OriginalFilename", "MiaoScreen.exe\0"
+            VALUE "ProductName", "MiaoScreen\0"
             VALUE "ProductVersion", VERSION "\0"
         END
     END

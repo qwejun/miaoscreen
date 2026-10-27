@@ -45,10 +45,17 @@ impl SettingsView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        window.set_window_title(bongocat_i18n::text(
+        // The caption carries the build's version. Two builds of this app can
+        // sit in different folders on the same machine — the one that is
+        // running has to be identifiable from the taskbar alone, without
+        // opening About and without guessing from a file timestamp.
+        let title = bongocat_i18n::text(
             snapshot.resolved_language.catalog_locale(),
             "navigation.settings.title",
-        ));
+        );
+        window.set_window_title(
+            format!("{title} {}", snapshot.build_info.product_version).as_str(),
+        );
         self.syncing_component_inputs = true;
         #[cfg(target_os = "windows")]
         self.window_background_color.update(cx, |picker, cx| {

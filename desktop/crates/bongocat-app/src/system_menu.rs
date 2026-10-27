@@ -11,9 +11,14 @@ pub(crate) fn system_menu_presentation(snapshot: &SettingsSnapshot) -> SystemMen
     // tray menu in English for every language other than Chinese.
     let locale = snapshot.resolved_language.catalog_locale();
     let text = |key| bongocat_i18n::text(locale, key).to_owned();
+    let product = text("system_menu.title");
     SystemMenuPresentation {
-        title: text("system_menu.title"),
-        tooltip: text("system_menu.title"),
+        title: product.clone(),
+        // The tooltip is a creation-time input that cannot be changed later
+        // (see `NativeSystemMenu`), which is exactly right for a version: it is
+        // fixed for the life of the process. Hovering the tray icon is the
+        // fastest way to answer "which build am I running".
+        tooltip: format!("{product} {}", bongocat_app::PRODUCT_VERSION),
         open_settings: text("system_menu.open_settings"),
         model_window: text("navigation.model_window.title"),
         hide_overlay: text("settings.overlay.hide_model_window.label"),
@@ -26,16 +31,11 @@ pub(crate) fn system_menu_presentation(snapshot: &SettingsSnapshot) -> SystemMen
         click_through_enabled: snapshot.overlay.click_through,
         always_on_top_enabled: snapshot.overlay.always_on_top,
         hide_on_pointer_hover_enabled: snapshot.overlay.hide_on_pointer_hover,
-        // A Production build stays gated on its channel and release signing key
-        // (`bongocat_app::update_check_available`): without them a check can only fail.
-        // A Development build can never update either, but the update window is where
-        // that is *explained* (`Unavailable · DevelopmentBuild`), so its entry stays
-        // clickable and clicking it shows the development-build explanation.
-        update_check_available: bongocat_app::update_check_available()
-            || matches!(
-                bongocat_app::BUILD_ENVIRONMENT,
-                bongocat_config::BuildEnvironment::Development
-            ),
+        // Never shown. This product has no update feed: a release is a zip the
+        // user replaces by hand, so the row could only ever answer "no update".
+        // Leaving it out also keeps the tray menu from looking like it has a
+        // feature the build cannot perform.
+        update_check_available: false,
     }
 }
 
