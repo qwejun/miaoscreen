@@ -85,7 +85,9 @@ use model_import_card::ModelImportCard;
 use model_mver_dialog::build_mver_mode_dialog;
 mod models;
 mod navigation;
-pub use device_page::{DeviceLink, DeviceOverlayConfig, install_device_link};
+pub use device_page::{
+    DeviceLink, DeviceOverlayConfig, device_page_index, install_device_link,
+};
 pub use navigation::SettingsNavigationMemory;
 use navigation::{SettingsNavigationPage, model_library_search_keywords};
 mod plugins_host;

@@ -2,7 +2,7 @@
   "_version": 1,
   "navigation": {
     "settings": {
-      "title": "إعدادات BongoCat"
+      "title": "إعدادات MiaoScreen"
     },
     "appearance": {
       "title": "المظهر واللغة"
@@ -34,9 +34,9 @@
     }
   },
   "system_menu": {
-    "title": "BongoCat",
+    "title": "MiaoScreen",
     "open_settings": "الإعدادات",
-    "quit": "إنهاء BongoCat"
+    "quit": "إنهاء MiaoScreen"
   },
   "application_menu": {
     "file": "ملف",
@@ -46,7 +46,7 @@
     "close": "إغلاق",
     "minimize": "تصغير",
     "zoom": "تكبير/تصغير",
-    "hide": "إخفاء BongoCat",
+    "hide": "إخفاء MiaoScreen",
     "hide_others": "إخفاء الآخرين",
     "show_all": "إظهار الكل",
     "undo": "تراجع",
@@ -60,7 +60,7 @@
     "later": "الإعداد لاحقًا",
     "input_monitoring": {
       "title": "مطلوب إذن مراقبة الإدخال",
-      "description": "يحتاج BongoCat إلى إذن «مراقبة الإدخال» لاستقبال إدخال لوحة المفاتيح والفأرة.",
+      "description": "يحتاج MiaoScreen إلى إذن «مراقبة الإدخال» لاستقبال إدخال لوحة المفاتيح والفأرة.",
       "open_settings": "فتح إعدادات النظام"
     },
     "administrator": {
@@ -184,24 +184,24 @@
   },
   "update": {
     "window": {
-      "title": "تحديث BongoCat"
+      "title": "تحديث MiaoScreen"
     },
     "heading": {
-      "title": "تحديث BongoCat"
+      "title": "تحديث MiaoScreen"
     },
     "current_version": "الإصدار الحالي %{version}",
     "status": {
-      "idle": "تحقّق من وجود إصدار أحدث من BongoCat.",
+      "idle": "تحقّق من وجود إصدار أحدث من MiaoScreen.",
       "checking": "جارٍ البحث عن تحديثات…",
-      "up_to_date": "BongoCat %{version} هو أحدث إصدار.",
-      "available": "يمكن تثبيت BongoCat %{version}.",
+      "up_to_date": "MiaoScreen %{version} هو أحدث إصدار.",
+      "available": "يمكن تثبيت MiaoScreen %{version}.",
       "downloading": "جارٍ التنزيل… %{percent}%",
       "downloading_unknown": "جارٍ التنزيل…",
-      "downloading_detail": "BongoCat %{version} · %{downloaded} من %{total}",
-      "verifying": "جارٍ التحقق من BongoCat %{version} الذي نُزّل…",
-      "installing": "جارٍ تثبيت BongoCat %{version}…",
-      "installed_restarting": "تم تثبيت BongoCat %{version}. جارٍ إعادة التشغيل…",
-      "installed_relaunching": "تم تثبيت BongoCat %{version}. سيعيد المثبّت تشغيله الآن."
+      "downloading_detail": "MiaoScreen %{version} · %{downloaded} من %{total}",
+      "verifying": "جارٍ التحقق من MiaoScreen %{version} الذي نُزّل…",
+      "installing": "جارٍ تثبيت MiaoScreen %{version}…",
+      "installed_restarting": "تم تثبيت MiaoScreen %{version}. جارٍ إعادة التشغيل…",
+      "installed_relaunching": "تم تثبيت MiaoScreen %{version}. سيعيد المثبّت تشغيله الآن."
     },
     "notes": {
       "title": "ما الجديد"
@@ -215,10 +215,10 @@
     },
     "error": {
       "stage": {
-        "check": "تعذّر البحث عن إصدار جديد من BongoCat %{version}.",
-        "download": "تعذّر تنزيل BongoCat %{version}.",
-        "verify": "تعذّر التحقق من BongoCat %{version} الذي نُزّل.",
-        "install": "تعذّر تثبيت BongoCat %{version}."
+        "check": "تعذّر البحث عن إصدار جديد من MiaoScreen %{version}.",
+        "download": "تعذّر تنزيل MiaoScreen %{version}.",
+        "verify": "تعذّر التحقق من MiaoScreen %{version} الذي نُزّل.",
+        "install": "تعذّر تثبيت MiaoScreen %{version}."
       },
       "not_configured": "التحديثات غير مفعّلة في هذا الإصدار.",
       "environment_disabled": "لا يمكن لهذا الإصدار تثبيت التحديثات.",
@@ -230,9 +230,9 @@
       "checksum_mismatch": "التحديث المُنزَّل تالف أو غير مكتمل.",
       "signature_invalid": "تعذّر التحقق من التحديث ولم يُثبَّت.",
       "archive_invalid": "تعذّرت قراءة التحديث المُنزَّل.",
-      "install_path_not_writable": "لا يمكن تحديث BongoCat في موقعه الحالي.",
-      "install_failed": "تعذّر تحديث BongoCat.",
-      "restart_failed": "تعذّرت إعادة تشغيل BongoCat. شغّله مجددًا لاستخدام الإصدار الجديد.",
+      "install_path_not_writable": "لا يمكن تحديث MiaoScreen في موقعه الحالي.",
+      "install_failed": "تعذّر تحديث MiaoScreen.",
+      "restart_failed": "تعذّرت إعادة تشغيل MiaoScreen. شغّله مجددًا لاستخدام الإصدار الجديد.",
       "internal": "فشل التحديث لسبب غير متوقع."
     },
     "unavailable": {
@@ -313,7 +313,7 @@
       "model_already_installed": "هذا النموذج مثبَّت بالفعل",
       "model_import_invalid_package": "حزمة النموذج غير صالحة",
       "model_import_drop_invalid": "أفلت مجلد نموذج صالح واحدًا في كل مرة",
-      "model_import_source_invalid": "يحتوي المجلد المحدد على مخزن نماذج BongoCat. اختر مجلد نموذج بعينه بدلًا من ذلك.",
+      "model_import_source_invalid": "يحتوي المجلد المحدد على مخزن نماذج MiaoScreen. اختر مجلد نموذج بعينه بدلًا من ذلك.",
       "model_import_source_changed": "تغيّر مصدر النموذج أثناء الاستيراد",
       "model_import_source_unsupported": "يحتوي مصدر النموذج على ملف غير مدعوم",
       "model_import_cancelled": "أُلغي استيراد النموذج",
@@ -331,7 +331,7 @@
       "dock_icon_update_failed": "تعذّر تحديث أيقونة Dock.",
       "window_hide_failed": "تعذّر إخفاء نافذة الإعدادات",
       "window_layout_save_failed": "تعذّر حفظ تخطيط النافذة",
-      "application_shutdown_failed": "تعذّر إغلاق BongoCat بالكامل"
+      "application_shutdown_failed": "تعذّر إغلاق MiaoScreen بالكامل"
     }
   },
   "settings": {
@@ -366,12 +366,6 @@
       "window_background_color": {
         "label": "لون خلفية النافذة"
       },
-      "behavior": {
-        "title": "سلوك النافذة"
-      },
-      "appearance": {
-        "title": "مظهر النافذة"
-      },
       "performance": {
         "title": "أداء النافذة"
       },
@@ -392,9 +386,6 @@
         "side_right": "يمين",
         "description": "أثناء الاستمرار على هذا المفتاح، يتوقف تأثير \"تمرير نقرات الفأرة\" و\"الإخفاء عند مرور الفأرة\" مؤقتًا."
       },
-      "keep_inside_screen": {
-        "label": "إبقاؤها على الشاشة"
-      },
       "hide_on_mouse_hover": {
         "label": "الإخفاء عند مرور الفأرة"
       },
@@ -406,18 +397,6 @@
       },
       "hide_on_idle_delay": {
         "label": "مهلة الإخفاء عند عدم التفاعل (بالثواني)"
-      },
-      "scale": {
-        "label": "حجم النافذة"
-      },
-      "opacity": {
-        "label": "شفافية النافذة"
-      },
-      "corner_radius": {
-        "label": "استدارة زوايا النافذة"
-      },
-      "maximum_fps": {
-        "label": "أقصى عدد إطارات في الثانية"
       }
     },
     "device_screen": {
@@ -585,7 +564,7 @@
         "checking": "جارٍ التحقق من عنصر بدء التشغيل…",
         "unavailable": "الحالة غير متاحة؛ انقر على المفتاح لإعادة المحاولة",
         "stale": "تغيّر موقع التطبيق المحفوظ؛ أطفئ المفتاح ثم أعد تشغيله لإصلاحه",
-        "requires_approval": "اسمح لـ BongoCat في إعدادات النظام",
+        "requires_approval": "اسمح لـ MiaoScreen في إعدادات النظام",
         "not_found": "عنصر بدء التشغيل مفقود؛ أطفئ المفتاح ثم أعد تشغيله لإصلاحه",
         "unsupported_platform": "التشغيل التلقائي عند بدء تشغيل الجهاز غير متاح على هذا النظام",
         "unsupported_os": "التشغيل التلقائي عند بدء تشغيل الجهاز غير متاح على نظام التشغيل هذا",

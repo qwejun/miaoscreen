@@ -14,12 +14,22 @@ use gpui_kit::{App, Context, Global};
 
 use super::SettingsView;
 
+/// The sidebar entry a device run opens on.
+///
+/// The host seeds the process-owned navigation memory with it before the first
+/// window exists, so a start that exists to drive a panel lands on the panel's
+/// page instead of on the appearance page. The index lives here rather than in
+/// the host so the sidebar order keeps one owner.
+pub fn device_page_index() -> usize {
+    super::navigation::SettingsNavigationPage::DeviceScreen.index()
+}
+
 /// How often the page looks for a newer snapshot.
 ///
-/// The panel captures at two frames a second, so a faster poll would only decode
-/// the same JPEG again; a slower one would make drags on the text fields feel
-/// disconnected from the strip.
-const PREVIEW_POLL: Duration = Duration::from_millis(700);
+/// The panel captures one snapshot every two seconds, so polling faster only
+/// decodes the same JPEG again. The strip edits do not wait for it: they travel
+/// on their own message and show up on the panel immediately.
+const PREVIEW_POLL: Duration = Duration::from_millis(2000);
 
 /// The strip settings the page edits.
 #[derive(Clone, Debug, PartialEq)]

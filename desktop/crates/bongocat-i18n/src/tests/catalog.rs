@@ -74,32 +74,32 @@ fn locale_source_uses_nested_snake_case_keys() {
 
 #[test]
 fn missing_locale_text_falls_back_to_english() {
-    assert_eq!(text("zh-CN", "navigation.settings.title"), "BongoCat 设置");
-    assert_eq!(text("zh-TW", "navigation.settings.title"), "BongoCat 設定");
+    assert_eq!(text("zh-CN", "navigation.settings.title"), "喵屏设置");
+    assert_eq!(text("zh-TW", "navigation.settings.title"), "喵屏設定");
     assert_eq!(
         text("ar-SA", "navigation.settings.title"),
-        "إعدادات BongoCat"
+        "إعدادات MiaoScreen"
     );
     assert_eq!(
         text("vi-VN", "navigation.settings.title"),
-        "Cài đặt BongoCat"
+        "Cài đặt MiaoScreen"
     );
     assert_eq!(
         text("pt-BR", "navigation.settings.title"),
-        "Configurações do BongoCat"
+        "Configurações do MiaoScreen"
     );
-    assert_eq!(text("ko-KR", "navigation.settings.title"), "BongoCat 설정");
+    assert_eq!(text("ko-KR", "navigation.settings.title"), "MiaoScreen 설정");
     assert_eq!(
         text("fr-FR", "navigation.settings.title"),
-        "Paramètres de BongoCat"
+        "Paramètres de MiaoScreen"
     );
     assert_eq!(
         text("system", "navigation.settings.title"),
-        "BongoCat Settings"
+        "MiaoScreen Settings"
     );
     assert_eq!(
         text("de-DE", "navigation.settings.title"),
-        "BongoCat Settings"
+        "MiaoScreen Settings"
     );
 }
 

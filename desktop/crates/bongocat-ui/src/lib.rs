@@ -11,7 +11,7 @@ mod pop_confirm;
 mod window;
 pub use window::{
     DeviceLink, DeviceOverlayConfig, SettingsNavigationMemory, SettingsView, SettingsWindowHandle,
-    SettingsWindowSeed, install_device_link, open_settings_window,
+    SettingsWindowSeed, device_page_index, install_device_link, open_settings_window,
 };
 
 mod update_markdown;

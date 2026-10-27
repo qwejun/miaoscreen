@@ -2,7 +2,7 @@
   "_version": 1,
   "navigation": {
     "settings": {
-      "title": "Paramètres de BongoCat"
+      "title": "Paramètres de MiaoScreen"
     },
     "appearance": {
       "title": "Apparence et langue"
@@ -34,9 +34,9 @@
     }
   },
   "system_menu": {
-    "title": "BongoCat",
+    "title": "MiaoScreen",
     "open_settings": "Paramètres",
-    "quit": "Quitter BongoCat"
+    "quit": "Quitter MiaoScreen"
   },
   "application_menu": {
     "file": "Fichier",
@@ -46,7 +46,7 @@
     "close": "Fermer",
     "minimize": "Réduire",
     "zoom": "Réduire/agrandir",
-    "hide": "Masquer BongoCat",
+    "hide": "Masquer MiaoScreen",
     "hide_others": "Masquer les autres",
     "show_all": "Tout afficher",
     "undo": "Annuler",
@@ -60,7 +60,7 @@
     "later": "Configurer plus tard",
     "input_monitoring": {
       "title": "Autorisation de surveillance de l’entrée requise",
-      "description": "BongoCat a besoin de l’autorisation de surveillance de l’entrée pour recevoir les saisies du clavier et de la souris.",
+      "description": "MiaoScreen a besoin de l’autorisation de surveillance de l’entrée pour recevoir les saisies du clavier et de la souris.",
       "open_settings": "Ouvrir Réglages Système"
     },
     "administrator": {
@@ -184,24 +184,24 @@
   },
   "update": {
     "window": {
-      "title": "Mise à jour de BongoCat"
+      "title": "Mise à jour de MiaoScreen"
     },
     "heading": {
-      "title": "Mettre à jour BongoCat"
+      "title": "Mettre à jour MiaoScreen"
     },
     "current_version": "Version actuelle %{version}",
     "status": {
-      "idle": "Rechercher une version plus récente de BongoCat.",
+      "idle": "Rechercher une version plus récente de MiaoScreen.",
       "checking": "Recherche de mises à jour…",
-      "up_to_date": "BongoCat %{version} est la dernière version.",
-      "available": "BongoCat %{version} peut être installé.",
+      "up_to_date": "MiaoScreen %{version} est la dernière version.",
+      "available": "MiaoScreen %{version} peut être installé.",
       "downloading": "Téléchargement… %{percent} %",
       "downloading_unknown": "Téléchargement…",
-      "downloading_detail": "BongoCat %{version} · %{downloaded} sur %{total}",
-      "verifying": "Vérification de BongoCat %{version} téléchargé…",
-      "installing": "Installation de BongoCat %{version}…",
-      "installed_restarting": "BongoCat %{version} a été installé. Redémarrage…",
-      "installed_relaunching": "BongoCat %{version} a été installé. Le programme d’installation le redémarre maintenant."
+      "downloading_detail": "MiaoScreen %{version} · %{downloaded} sur %{total}",
+      "verifying": "Vérification de MiaoScreen %{version} téléchargé…",
+      "installing": "Installation de MiaoScreen %{version}…",
+      "installed_restarting": "MiaoScreen %{version} a été installé. Redémarrage…",
+      "installed_relaunching": "MiaoScreen %{version} a été installé. Le programme d’installation le redémarre maintenant."
     },
     "notes": {
       "title": "Nouveautés"
@@ -215,10 +215,10 @@
     },
     "error": {
       "stage": {
-        "check": "Impossible de rechercher une nouvelle version de BongoCat %{version}.",
-        "download": "Impossible de télécharger BongoCat %{version}.",
-        "verify": "Impossible de vérifier BongoCat %{version} téléchargé.",
-        "install": "Impossible d’installer BongoCat %{version}."
+        "check": "Impossible de rechercher une nouvelle version de MiaoScreen %{version}.",
+        "download": "Impossible de télécharger MiaoScreen %{version}.",
+        "verify": "Impossible de vérifier MiaoScreen %{version} téléchargé.",
+        "install": "Impossible d’installer MiaoScreen %{version}."
       },
       "not_configured": "Les mises à jour ne sont pas activées dans cette version.",
       "environment_disabled": "Cette version ne peut pas installer de mises à jour.",
@@ -230,9 +230,9 @@
       "checksum_mismatch": "La mise à jour téléchargée est endommagée ou incomplète.",
       "signature_invalid": "La mise à jour n’a pas pu être vérifiée et n’a pas été installée.",
       "archive_invalid": "La mise à jour téléchargée n’a pas pu être lue.",
-      "install_path_not_writable": "BongoCat ne peut pas être mis à jour à son emplacement actuel.",
-      "install_failed": "BongoCat n’a pas pu être mis à jour.",
-      "restart_failed": "BongoCat n’a pas pu redémarrer. Relancez-le pour utiliser la nouvelle version.",
+      "install_path_not_writable": "MiaoScreen ne peut pas être mis à jour à son emplacement actuel.",
+      "install_failed": "MiaoScreen n’a pas pu être mis à jour.",
+      "restart_failed": "MiaoScreen n’a pas pu redémarrer. Relancez-le pour utiliser la nouvelle version.",
       "internal": "La mise à jour a échoué pour une raison inattendue."
     },
     "unavailable": {
@@ -313,7 +313,7 @@
       "model_already_installed": "Ce modèle est déjà installé",
       "model_import_invalid_package": "Le paquet du modèle n’est pas valide",
       "model_import_drop_invalid": "Déposez un seul dossier de modèle valide à la fois",
-      "model_import_source_invalid": "Le dossier sélectionné contient le stockage des modèles de BongoCat. Choisissez plutôt le dossier d’un modèle.",
+      "model_import_source_invalid": "Le dossier sélectionné contient le stockage des modèles de MiaoScreen. Choisissez plutôt le dossier d’un modèle.",
       "model_import_source_changed": "La source du modèle a changé pendant l’importation",
       "model_import_source_unsupported": "La source du modèle contient un fichier non pris en charge",
       "model_import_cancelled": "L’importation du modèle a été annulée",
@@ -331,7 +331,7 @@
       "dock_icon_update_failed": "Impossible de mettre à jour l’icône du Dock.",
       "window_hide_failed": "La fenêtre des paramètres n’a pas pu être masquée",
       "window_layout_save_failed": "La disposition des fenêtres n’a pas pu être enregistrée",
-      "application_shutdown_failed": "BongoCat n’a pas pu se fermer complètement"
+      "application_shutdown_failed": "MiaoScreen n’a pas pu se fermer complètement"
     }
   },
   "settings": {
@@ -366,12 +366,6 @@
       "window_background_color": {
         "label": "Couleur d’arrière-plan de la fenêtre"
       },
-      "behavior": {
-        "title": "Comportement de la fenêtre"
-      },
-      "appearance": {
-        "title": "Apparence de la fenêtre"
-      },
       "performance": {
         "title": "Performances de la fenêtre"
       },
@@ -392,9 +386,6 @@
         "side_right": "Droite",
         "description": "Tant qu’elle est maintenue, « Clics de souris traversants » et « Masquer au survol de la souris » sont temporairement désactivés."
       },
-      "keep_inside_screen": {
-        "label": "Garder à l’écran"
-      },
       "hide_on_mouse_hover": {
         "label": "Masquer au survol de la souris"
       },
@@ -406,18 +397,6 @@
       },
       "hide_on_idle_delay": {
         "label": "Délai de masquage en cas d’inactivité (secondes)"
-      },
-      "scale": {
-        "label": "Échelle de la fenêtre"
-      },
-      "opacity": {
-        "label": "Opacité de la fenêtre"
-      },
-      "corner_radius": {
-        "label": "Rayon des coins de la fenêtre"
-      },
-      "maximum_fps": {
-        "label": "FPS maximum"
       }
     },
     "device_screen": {
@@ -585,7 +564,7 @@
         "checking": "Vérification de l’élément d’ouverture…",
         "unavailable": "État indisponible ; cliquez sur l’interrupteur pour réessayer",
         "stale": "L’emplacement enregistré de l’application a changé ; désactivez puis réactivez l’interrupteur pour réparer",
-        "requires_approval": "Autorisez BongoCat dans Réglages Système",
+        "requires_approval": "Autorisez MiaoScreen dans Réglages Système",
         "not_found": "L’élément d’ouverture est introuvable ; désactivez puis réactivez l’interrupteur pour réparer",
         "unsupported_platform": "Le lancement au démarrage n’est pas disponible sur ce système",
         "unsupported_os": "Le lancement au démarrage n’est pas disponible sur ce système d’exploitation",

@@ -6,8 +6,8 @@ use gpui_kit::component::Sizable as _;
 /// The project links are product-owned constants rather than values received
 /// from a snapshot. They are passed through the platform adapter's HTTPS-only
 /// URL validator before the operating system is asked to open them.
-pub(super) const PROJECT_SOURCE_URL: &str = "https://github.com/ayangweb/BongoCat";
-pub(super) const FEEDBACK_URL: &str = "https://github.com/ayangweb/BongoCat/issues/new/choose";
+pub(super) const PROJECT_SOURCE_URL: &str = "https://github.com/qwejun/miaoscreen";
+pub(super) const FEEDBACK_URL: &str = "https://github.com/qwejun/miaoscreen/issues";
 
 /// Every user-visible string on the About page belongs to this small contract.
 /// Keeping it beside the page assembly makes the settings smoke check cover
@@ -28,7 +28,7 @@ pub(super) const ABOUT_LOCALIZED_KEYS: [&str; 12] = [
 ];
 
 /// The product identity the report names, and the About page's own row title.
-const PRODUCT_NAME: &str = "BongoCat";
+const PRODUCT_NAME: &str = "MiaoScreen";
 
 /// The bug-report document `copy_software_info` puts on the clipboard.
 ///

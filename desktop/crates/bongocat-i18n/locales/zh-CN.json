@@ -2,7 +2,7 @@
   "_version": 1,
   "navigation": {
     "settings": {
-      "title": "BongoCat 设置"
+      "title": "喵屏设置"
     },
     "appearance": {
       "title": "外观与语言"
@@ -34,9 +34,9 @@
     }
   },
   "system_menu": {
-    "title": "BongoCat",
+    "title": "喵屏",
     "open_settings": "设置",
-    "quit": "退出 BongoCat"
+    "quit": "退出喵屏"
   },
   "application_menu": {
     "file": "文件",
@@ -46,7 +46,7 @@
     "close": "关闭",
     "minimize": "最小化",
     "zoom": "缩放",
-    "hide": "隐藏 BongoCat",
+    "hide": "隐藏喵屏",
     "hide_others": "隐藏其他",
     "show_all": "全部显示",
     "undo": "撤销",
@@ -60,7 +60,7 @@
     "later": "稍后设置",
     "input_monitoring": {
       "title": "需要「输入监控」权限",
-      "description": "BongoCat 需要「输入监控」权限，才能正常接收键盘和鼠标输入。",
+      "description": "喵屏需要「输入监控」权限，才能正常接收键盘和鼠标输入。",
       "open_settings": "打开系统设置"
     },
     "administrator": {
@@ -184,24 +184,24 @@
   },
   "update": {
     "window": {
-      "title": "BongoCat 更新"
+      "title": "喵屏更新"
     },
     "heading": {
-      "title": "更新 BongoCat"
+      "title": "更新喵屏"
     },
     "current_version": "当前版本 %{version}",
     "status": {
-      "idle": "检查 BongoCat 是否有新版本。",
+      "idle": "检查喵屏是否有新版本。",
       "checking": "正在检查更新…",
-      "up_to_date": "BongoCat %{version} 已是最新版本。",
-      "available": "BongoCat %{version} 可以安装。",
+      "up_to_date": "喵屏 %{version} 已是最新版本。",
+      "available": "喵屏 %{version} 可以安装。",
       "downloading": "正在下载… %{percent}%",
       "downloading_unknown": "正在下载…",
-      "downloading_detail": "BongoCat %{version} · %{downloaded} / %{total}",
-      "verifying": "正在校验已下载的 BongoCat %{version}…",
-      "installing": "正在安装 BongoCat %{version}…",
-      "installed_restarting": "BongoCat %{version} 已安装，正在重启…",
-      "installed_relaunching": "BongoCat %{version} 已安装，安装程序将立即重启它。"
+      "downloading_detail": "喵屏 %{version} · %{downloaded} / %{total}",
+      "verifying": "正在校验已下载的喵屏 %{version}…",
+      "installing": "正在安装喵屏 %{version}…",
+      "installed_restarting": "喵屏 %{version} 已安装，正在重启…",
+      "installed_relaunching": "喵屏 %{version} 已安装，安装程序将立即重启它。"
     },
     "notes": {
       "title": "更新内容"
@@ -215,10 +215,10 @@
     },
     "error": {
       "stage": {
-        "check": "无法检查 BongoCat %{version} 是否有新版本。",
-        "download": "无法下载 BongoCat %{version}。",
-        "verify": "无法校验已下载的 BongoCat %{version}。",
-        "install": "无法安装 BongoCat %{version}。"
+        "check": "无法检查喵屏 %{version} 是否有新版本。",
+        "download": "无法下载喵屏 %{version}。",
+        "verify": "无法校验已下载的喵屏 %{version}。",
+        "install": "无法安装喵屏 %{version}。"
       },
       "not_configured": "当前版本未开启更新功能。",
       "environment_disabled": "当前版本无法安装更新。",
@@ -230,9 +230,9 @@
       "checksum_mismatch": "下载的更新包已损坏或不完整。",
       "signature_invalid": "无法验证该更新包，已放弃安装。",
       "archive_invalid": "无法读取已下载的更新包。",
-      "install_path_not_writable": "无法在当前位置更新 BongoCat。",
-      "install_failed": "无法更新 BongoCat。",
-      "restart_failed": "无法重启 BongoCat，请手动启动以使用新版本。",
+      "install_path_not_writable": "无法在当前位置更新喵屏。",
+      "install_failed": "无法更新喵屏。",
+      "restart_failed": "无法重启喵屏，请手动启动以使用新版本。",
       "internal": "更新因未预期原因失败。"
     },
     "unavailable": {
@@ -313,7 +313,7 @@
       "model_already_installed": "该模型已安装",
       "model_import_invalid_package": "模型包无效",
       "model_import_drop_invalid": "请一次拖入一个有效的模型文件夹",
-      "model_import_source_invalid": "所选文件夹包含 BongoCat 的模型存储位置；请改选单个模型文件夹。",
+      "model_import_source_invalid": "所选文件夹包含喵屏的模型存储位置；请改选单个模型文件夹。",
       "model_import_source_changed": "模型来源在导入期间发生变化",
       "model_import_source_unsupported": "模型来源中包含不支持的文件",
       "model_import_cancelled": "模型导入已取消",
@@ -331,7 +331,7 @@
       "dock_icon_update_failed": "无法更新程序坞图标。",
       "window_hide_failed": "无法隐藏设置窗口",
       "window_layout_save_failed": "无法保存窗口布局",
-      "application_shutdown_failed": "BongoCat 未能完全关闭"
+      "application_shutdown_failed": "喵屏未能完全关闭"
     }
   },
   "settings": {
@@ -366,12 +366,6 @@
       "window_background_color": {
         "label": "窗口背景颜色"
       },
-      "behavior": {
-        "title": "窗口行为"
-      },
-      "appearance": {
-        "title": "窗口外观"
-      },
       "performance": {
         "title": "窗口性能"
       },
@@ -392,9 +386,6 @@
         "side_right": "右",
         "description": "按住时，「鼠标穿透」和「鼠标悬停时隐藏」将暂时失效。"
       },
-      "keep_inside_screen": {
-        "label": "保持在屏幕内"
-      },
       "hide_on_mouse_hover": {
         "label": "鼠标悬停时隐藏"
       },
@@ -406,18 +397,6 @@
       },
       "hide_on_idle_delay": {
         "label": "无操作时隐藏延迟（秒）"
-      },
-      "scale": {
-        "label": "窗口缩放"
-      },
-      "opacity": {
-        "label": "窗口不透明度"
-      },
-      "corner_radius": {
-        "label": "窗口圆角"
-      },
-      "maximum_fps": {
-        "label": "最大帧率"
       }
     },
     "device_screen": {
@@ -585,7 +564,7 @@
         "checking": "正在检查登录项…",
         "unavailable": "暂时无法获取状态；点击开关重试",
         "stale": "应用位置已变化；重新开关一次即可修复",
-        "requires_approval": "请在系统设置中批准 BongoCat",
+        "requires_approval": "请在系统设置中批准喵屏",
         "not_found": "登录项缺失；重新开关一次即可修复",
         "unsupported_platform": "当前系统不支持开机自启动",
         "unsupported_os": "当前操作系统不支持开机自启动",

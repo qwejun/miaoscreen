@@ -62,7 +62,7 @@ use bongocat_platform::{SystemMenu, SystemMenuAction, SystemMenuPresentation};
 use bongocat_runtime::{hover_hide_delay_ms, idle_hide_delay_ms};
 use bongocat_ui::{
     SettingsNavigationMemory, SettingsView, SettingsWindowHandle, SettingsWindowSeed,
-    open_settings_window,
+    device_page_index, open_settings_window,
 };
 use bongocat_ui_protocol::{
     AutomaticUpdateSettings, SettingsClient, SettingsError, SettingsErrorCode,
@@ -720,7 +720,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             settings_service: Some(settings_service),
             plugin_service,
             settings_window: None,
-            settings_navigation_memory: SettingsNavigationMemory::new(),
+            // A device run is about the panel, so its first window lands on the
+            // panel's page. The memory is process-owned, so this only sets the
+            // starting point; the person's own page choice wins after that.
+            settings_navigation_memory: {
+                let memory = SettingsNavigationMemory::new();
+                if run_options.device_screen.is_some() {
+                    memory.set_page_index(device_page_index());
+                }
+                memory
+            },
             update_service: Some(update_service),
             update_window: None,
             product_language: initial_settings_snapshot.resolved_language,

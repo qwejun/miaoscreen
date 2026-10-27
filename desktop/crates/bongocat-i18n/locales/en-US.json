@@ -2,7 +2,7 @@
   "_version": 1,
   "navigation": {
     "settings": {
-      "title": "BongoCat Settings"
+      "title": "MiaoScreen Settings"
     },
     "appearance": {
       "title": "Appearance & language"
@@ -34,9 +34,9 @@
     }
   },
   "system_menu": {
-    "title": "BongoCat",
+    "title": "MiaoScreen",
     "open_settings": "Settings",
-    "quit": "Quit BongoCat"
+    "quit": "Quit MiaoScreen"
   },
   "application_menu": {
     "file": "File",
@@ -46,7 +46,7 @@
     "close": "Close",
     "minimize": "Minimize",
     "zoom": "Zoom",
-    "hide": "Hide BongoCat",
+    "hide": "Hide MiaoScreen",
     "hide_others": "Hide Others",
     "show_all": "Show All",
     "undo": "Undo",
@@ -60,7 +60,7 @@
     "later": "Set Up Later",
     "input_monitoring": {
       "title": "Input Monitoring Permission Required",
-      "description": "BongoCat needs Input Monitoring permission to receive keyboard and mouse input.",
+      "description": "MiaoScreen needs Input Monitoring permission to receive keyboard and mouse input.",
       "open_settings": "Open System Settings"
     },
     "administrator": {
@@ -184,24 +184,24 @@
   },
   "update": {
     "window": {
-      "title": "BongoCat Update"
+      "title": "MiaoScreen Update"
     },
     "heading": {
-      "title": "Update BongoCat"
+      "title": "Update MiaoScreen"
     },
     "current_version": "Current version %{version}",
     "status": {
-      "idle": "Check for a newer version of BongoCat.",
+      "idle": "Check for a newer version of MiaoScreen.",
       "checking": "Checking for updates…",
-      "up_to_date": "BongoCat %{version} is the latest version.",
-      "available": "BongoCat %{version} can be installed.",
+      "up_to_date": "MiaoScreen %{version} is the latest version.",
+      "available": "MiaoScreen %{version} can be installed.",
       "downloading": "Downloading… %{percent}%",
       "downloading_unknown": "Downloading…",
-      "downloading_detail": "BongoCat %{version} · %{downloaded} of %{total}",
-      "verifying": "Verifying the downloaded BongoCat %{version}…",
-      "installing": "Installing BongoCat %{version}…",
-      "installed_restarting": "BongoCat %{version} was installed. Restarting…",
-      "installed_relaunching": "BongoCat %{version} was installed. The installer restarts it now."
+      "downloading_detail": "MiaoScreen %{version} · %{downloaded} of %{total}",
+      "verifying": "Verifying the downloaded MiaoScreen %{version}…",
+      "installing": "Installing MiaoScreen %{version}…",
+      "installed_restarting": "MiaoScreen %{version} was installed. Restarting…",
+      "installed_relaunching": "MiaoScreen %{version} was installed. The installer restarts it now."
     },
     "notes": {
       "title": "What's New"
@@ -215,10 +215,10 @@
     },
     "error": {
       "stage": {
-        "check": "Could not check for a new version of BongoCat %{version}.",
-        "download": "Could not download BongoCat %{version}.",
-        "verify": "Could not verify the downloaded BongoCat %{version}.",
-        "install": "Could not install BongoCat %{version}."
+        "check": "Could not check for a new version of MiaoScreen %{version}.",
+        "download": "Could not download MiaoScreen %{version}.",
+        "verify": "Could not verify the downloaded MiaoScreen %{version}.",
+        "install": "Could not install MiaoScreen %{version}."
       },
       "not_configured": "Updates are not enabled in this version.",
       "environment_disabled": "This version cannot install updates.",
@@ -230,9 +230,9 @@
       "checksum_mismatch": "The downloaded update is damaged or incomplete.",
       "signature_invalid": "The update could not be verified and was not installed.",
       "archive_invalid": "The downloaded update could not be read.",
-      "install_path_not_writable": "BongoCat cannot be updated in its current location.",
-      "install_failed": "BongoCat could not be updated.",
-      "restart_failed": "BongoCat could not restart. Start it again to use the new version.",
+      "install_path_not_writable": "MiaoScreen cannot be updated in its current location.",
+      "install_failed": "MiaoScreen could not be updated.",
+      "restart_failed": "MiaoScreen could not restart. Start it again to use the new version.",
       "internal": "The update failed for an unexpected reason."
     },
     "unavailable": {
@@ -313,7 +313,7 @@
       "model_already_installed": "This model is already installed",
       "model_import_invalid_package": "Model package is invalid",
       "model_import_drop_invalid": "Drop one valid model folder at a time",
-      "model_import_source_invalid": "The selected folder contains BongoCat's model storage. Choose an individual model folder instead.",
+      "model_import_source_invalid": "The selected folder contains MiaoScreen's model storage. Choose an individual model folder instead.",
       "model_import_source_changed": "Model source changed during import",
       "model_import_source_unsupported": "The model source contains an unsupported file",
       "model_import_cancelled": "Model import was cancelled",
@@ -331,7 +331,7 @@
       "dock_icon_update_failed": "Could not update the Dock icon.",
       "window_hide_failed": "Settings window could not be hidden",
       "window_layout_save_failed": "The window layout could not be saved",
-      "application_shutdown_failed": "BongoCat could not close completely"
+      "application_shutdown_failed": "MiaoScreen could not close completely"
     }
   },
   "settings": {
@@ -366,12 +366,6 @@
       "window_background_color": {
         "label": "Window background color"
       },
-      "behavior": {
-        "title": "Window behavior"
-      },
-      "appearance": {
-        "title": "Window appearance"
-      },
       "performance": {
         "title": "Window performance"
       },
@@ -392,9 +386,6 @@
         "side_right": "Right",
         "description": "While held, \"Mouse click-through\" and \"Hide on mouse hover\" are temporarily disabled."
       },
-      "keep_inside_screen": {
-        "label": "Keep on screen"
-      },
       "hide_on_mouse_hover": {
         "label": "Hide on mouse hover"
       },
@@ -406,18 +397,6 @@
       },
       "hide_on_idle_delay": {
         "label": "Idle hide delay (seconds)"
-      },
-      "scale": {
-        "label": "Window scale"
-      },
-      "opacity": {
-        "label": "Window opacity"
-      },
-      "corner_radius": {
-        "label": "Window corner radius"
-      },
-      "maximum_fps": {
-        "label": "Maximum FPS"
       }
     },
     "device_screen": {
@@ -585,7 +564,7 @@
         "checking": "Checking the login item…",
         "unavailable": "Status unavailable; click the switch to retry",
         "stale": "The saved app location changed; turn the switch off and on to repair",
-        "requires_approval": "Approve BongoCat in System Settings",
+        "requires_approval": "Approve MiaoScreen in System Settings",
         "not_found": "The login item is missing; turn the switch off and on to repair",
         "unsupported_platform": "Running at startup is unavailable on this system",
         "unsupported_os": "Running at startup is unavailable on this operating system",

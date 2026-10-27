@@ -2,7 +2,7 @@
   "_version": 1,
   "navigation": {
     "settings": {
-      "title": "Cài đặt BongoCat"
+      "title": "Cài đặt MiaoScreen"
     },
     "appearance": {
       "title": "Giao diện & ngôn ngữ"
@@ -34,9 +34,9 @@
     }
   },
   "system_menu": {
-    "title": "BongoCat",
+    "title": "MiaoScreen",
     "open_settings": "Cài đặt",
-    "quit": "Thoát BongoCat"
+    "quit": "Thoát MiaoScreen"
   },
   "application_menu": {
     "file": "Tệp",
@@ -46,7 +46,7 @@
     "close": "Đóng",
     "minimize": "Thu nhỏ",
     "zoom": "Thu phóng",
-    "hide": "Ẩn BongoCat",
+    "hide": "Ẩn MiaoScreen",
     "hide_others": "Ẩn ứng dụng khác",
     "show_all": "Hiển thị tất cả",
     "undo": "Hoàn tác",
@@ -60,7 +60,7 @@
     "later": "Thiết lập sau",
     "input_monitoring": {
       "title": "Cần cấp quyền Giám sát đầu vào",
-      "description": "BongoCat cần quyền Giám sát đầu vào để nhận thông tin từ bàn phím và chuột.",
+      "description": "MiaoScreen cần quyền Giám sát đầu vào để nhận thông tin từ bàn phím và chuột.",
       "open_settings": "Mở Cài đặt hệ thống"
     },
     "administrator": {
@@ -184,24 +184,24 @@
   },
   "update": {
     "window": {
-      "title": "Cập nhật BongoCat"
+      "title": "Cập nhật MiaoScreen"
     },
     "heading": {
-      "title": "Cập nhật BongoCat"
+      "title": "Cập nhật MiaoScreen"
     },
     "current_version": "Phiên bản hiện tại %{version}",
     "status": {
-      "idle": "Kiểm tra xem BongoCat có bản mới hơn không.",
+      "idle": "Kiểm tra xem MiaoScreen có bản mới hơn không.",
       "checking": "Đang kiểm tra cập nhật…",
-      "up_to_date": "BongoCat %{version} là bản mới nhất.",
-      "available": "Có thể cài đặt BongoCat %{version}.",
+      "up_to_date": "MiaoScreen %{version} là bản mới nhất.",
+      "available": "Có thể cài đặt MiaoScreen %{version}.",
       "downloading": "Đang tải… %{percent}%",
       "downloading_unknown": "Đang tải…",
-      "downloading_detail": "BongoCat %{version} · %{downloaded} trên %{total}",
-      "verifying": "Đang xác minh BongoCat %{version} đã tải…",
-      "installing": "Đang cài đặt BongoCat %{version}…",
-      "installed_restarting": "Đã cài đặt BongoCat %{version}. Đang khởi động lại…",
-      "installed_relaunching": "Đã cài đặt BongoCat %{version}. Trình cài đặt sẽ khởi động lại ngay."
+      "downloading_detail": "MiaoScreen %{version} · %{downloaded} trên %{total}",
+      "verifying": "Đang xác minh MiaoScreen %{version} đã tải…",
+      "installing": "Đang cài đặt MiaoScreen %{version}…",
+      "installed_restarting": "Đã cài đặt MiaoScreen %{version}. Đang khởi động lại…",
+      "installed_relaunching": "Đã cài đặt MiaoScreen %{version}. Trình cài đặt sẽ khởi động lại ngay."
     },
     "notes": {
       "title": "Có gì mới"
@@ -215,10 +215,10 @@
     },
     "error": {
       "stage": {
-        "check": "Không thể kiểm tra bản mới của BongoCat %{version}.",
-        "download": "Không thể tải BongoCat %{version}.",
-        "verify": "Không thể xác minh BongoCat %{version} đã tải.",
-        "install": "Không thể cài đặt BongoCat %{version}."
+        "check": "Không thể kiểm tra bản mới của MiaoScreen %{version}.",
+        "download": "Không thể tải MiaoScreen %{version}.",
+        "verify": "Không thể xác minh MiaoScreen %{version} đã tải.",
+        "install": "Không thể cài đặt MiaoScreen %{version}."
       },
       "not_configured": "Phiên bản này không bật cập nhật.",
       "environment_disabled": "Phiên bản này không thể cài đặt bản cập nhật.",
@@ -230,9 +230,9 @@
       "checksum_mismatch": "Bản cập nhật đã tải bị hỏng hoặc không đầy đủ.",
       "signature_invalid": "Không thể xác minh bản cập nhật nên chưa được cài đặt.",
       "archive_invalid": "Không thể đọc bản cập nhật đã tải.",
-      "install_path_not_writable": "Không thể cập nhật BongoCat tại vị trí hiện tại.",
-      "install_failed": "Không thể cập nhật BongoCat.",
-      "restart_failed": "Không thể khởi động lại BongoCat. Hãy mở lại ứng dụng để dùng phiên bản mới.",
+      "install_path_not_writable": "Không thể cập nhật MiaoScreen tại vị trí hiện tại.",
+      "install_failed": "Không thể cập nhật MiaoScreen.",
+      "restart_failed": "Không thể khởi động lại MiaoScreen. Hãy mở lại ứng dụng để dùng phiên bản mới.",
       "internal": "Cập nhật thất bại vì lý do không mong muốn."
     },
     "unavailable": {
@@ -313,7 +313,7 @@
       "model_already_installed": "Mô hình này đã được cài đặt",
       "model_import_invalid_package": "Gói mô hình không hợp lệ",
       "model_import_drop_invalid": "Hãy thả từng thư mục mô hình hợp lệ một",
-      "model_import_source_invalid": "Thư mục đã chọn chứa nơi lưu mô hình của BongoCat. Hãy chọn một thư mục mô hình riêng lẻ thay thế.",
+      "model_import_source_invalid": "Thư mục đã chọn chứa nơi lưu mô hình của MiaoScreen. Hãy chọn một thư mục mô hình riêng lẻ thay thế.",
       "model_import_source_changed": "Nguồn mô hình đã thay đổi trong khi nhập",
       "model_import_source_unsupported": "Nguồn mô hình chứa tệp không được hỗ trợ",
       "model_import_cancelled": "Đã hủy nhập mô hình",
@@ -331,7 +331,7 @@
       "dock_icon_update_failed": "Không thể cập nhật biểu tượng Dock.",
       "window_hide_failed": "Không thể ẩn cửa sổ cài đặt",
       "window_layout_save_failed": "Không thể lưu bố cục cửa sổ",
-      "application_shutdown_failed": "BongoCat không thể đóng hoàn toàn"
+      "application_shutdown_failed": "MiaoScreen không thể đóng hoàn toàn"
     }
   },
   "settings": {
@@ -366,12 +366,6 @@
       "window_background_color": {
         "label": "Màu nền cửa sổ"
       },
-      "behavior": {
-        "title": "Hành vi cửa sổ"
-      },
-      "appearance": {
-        "title": "Giao diện cửa sổ"
-      },
       "performance": {
         "title": "Hiệu năng cửa sổ"
       },
@@ -392,9 +386,6 @@
         "side_right": "Phải",
         "description": "Khi giữ phím này, \"Chuột xuyên qua cửa sổ\" và \"Ẩn khi rê chuột\" tạm thời không có hiệu lực."
       },
-      "keep_inside_screen": {
-        "label": "Giữ trong màn hình"
-      },
       "hide_on_mouse_hover": {
         "label": "Ẩn khi rê chuột"
       },
@@ -406,18 +397,6 @@
       },
       "hide_on_idle_delay": {
         "label": "Thời gian chờ ẩn khi không có thao tác (giây)"
-      },
-      "scale": {
-        "label": "Tỉ lệ cửa sổ"
-      },
-      "opacity": {
-        "label": "Độ mờ cửa sổ"
-      },
-      "corner_radius": {
-        "label": "Bo góc cửa sổ"
-      },
-      "maximum_fps": {
-        "label": "FPS tối đa"
       }
     },
     "device_screen": {
@@ -585,7 +564,7 @@
         "checking": "Đang kiểm tra mục khởi động…",
         "unavailable": "Không lấy được trạng thái; nhấn công tắc để thử lại",
         "stale": "Vị trí ứng dụng đã lưu đã thay đổi; hãy tắt rồi bật lại công tắc để sửa",
-        "requires_approval": "Cấp quyền cho BongoCat trong Cài đặt hệ thống",
+        "requires_approval": "Cấp quyền cho MiaoScreen trong Cài đặt hệ thống",
         "not_found": "Thiếu mục khởi động; hãy tắt rồi bật lại công tắc để sửa",
         "unsupported_platform": "Tính năng tự động khởi động không khả dụng trên hệ thống này",
         "unsupported_os": "Tính năng tự động khởi động không khả dụng trên hệ điều hành này",

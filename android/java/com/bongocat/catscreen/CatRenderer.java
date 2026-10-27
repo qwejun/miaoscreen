@@ -244,9 +244,9 @@ public final class CatRenderer implements GLSurfaceView.Renderer {
      * thread, so the rate is deliberately low: the preview is for judging layout
      * and content, not for motion.
      */
-    private static final long PREVIEW_INTERVAL_NANOS = 500_000_000L;
-    /** Snapshots travel at half the panel's resolution; the preview is ~360px. */
-    private static final int PREVIEW_SIZE = 400;
+    private static final long PREVIEW_INTERVAL_NANOS = 2_000_000_000L;
+    /** Snapshots travel at the preview's own size; the circle is drawn at 320px. */
+    private static final int PREVIEW_SIZE = 320;
     private static final int PREVIEW_QUALITY = 62;
 
     private long lastPreviewNanos;

@@ -244,8 +244,12 @@ impl RunOptions {
     }
 
     pub(crate) fn opens_settings_window_on_start(&self) -> bool {
-        let mut opens_settings_window =
-            self.settings_window_smoke || self.settings_window_open_smoke;
+        // A device run is the product's only mode: the panel is the display, so a
+        // start with no window on screen would look like nothing happened. The tray
+        // icon stays, so closing the window still leaves the stream running.
+        let mut opens_settings_window = self.settings_window_smoke
+            || self.settings_window_open_smoke
+            || self.device_screen.is_some();
         #[cfg(target_os = "macos")]
         {
             opens_settings_window |= self.application_reopen_smoke;

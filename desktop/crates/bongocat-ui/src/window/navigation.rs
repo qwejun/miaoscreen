@@ -177,7 +177,7 @@ impl SettingsNavigationPage {
                 "System icons",
                 "系统图标",
             ],
-            Self::About => &["About BongoCat", "关于 BongoCat"],
+            Self::About => &["About MiaoScreen", "关于喵屏", "About BongoCat", "关于 BongoCat"],
         }
     }
 }

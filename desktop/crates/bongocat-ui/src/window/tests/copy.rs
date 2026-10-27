@@ -62,7 +62,7 @@ fn copied_software_information_is_a_json_document() {
     .to_json()
     .expect("serialize the report");
     let parsed: serde_json::Value = serde_json::from_str(&json).expect("the report is valid JSON");
-    assert_eq!(parsed["app_name"], "BongoCat");
+    assert_eq!(parsed["app_name"], "MiaoScreen");
     assert_eq!(parsed["app_version"], env!("CARGO_PKG_VERSION"));
     assert_eq!(parsed["build_environment"], "development");
     assert_eq!(parsed["runtime_health"], "ready");

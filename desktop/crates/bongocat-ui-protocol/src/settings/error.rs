@@ -204,7 +204,7 @@ impl SettingsError {
             SettingsErrorCode::ModelImportInvalidPackage => "Model package is invalid",
             SettingsErrorCode::ModelImportDropInvalid => "Drop one valid model folder at a time",
             SettingsErrorCode::ModelImportSourceInvalid => {
-                "The selected folder contains BongoCat's model storage. Choose an individual model folder instead."
+                "The selected folder contains MiaoScreen's model storage. Choose an individual model folder instead."
             }
             SettingsErrorCode::ModelImportSourceChanged => "Model source changed during import",
             SettingsErrorCode::ModelImportSourceUnsupported => {
@@ -232,7 +232,7 @@ impl SettingsError {
             SettingsErrorCode::DockIconUpdateFailed => "Could not update the Dock icon.",
             SettingsErrorCode::WindowHideFailed => "Settings window could not be hidden",
             SettingsErrorCode::WindowStatePersistFailed => "The window layout could not be saved",
-            SettingsErrorCode::ShutdownFailed => "BongoCat could not close completely",
+            SettingsErrorCode::ShutdownFailed => "MiaoScreen could not close completely",
         }
     }
 }

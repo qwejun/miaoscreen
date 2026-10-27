@@ -523,6 +523,11 @@ mod platform {
                 &HSTRING::from(executable.as_os_str().to_string_lossy().as_ref()),
                 &HSTRING::from(arguments.as_str()),
                 None,
+                // `SW_SHOWNORMAL` and not `SW_HIDE`: the launch show state is
+                // inherited by the copy's first window, so hiding here would hide
+                // the settings window too. Release builds are GUI-subsystem
+                // binaries, so there is no console window to hide in the first
+                // place; a debug build's console is the price of the console.
                 SW_SHOWNORMAL,
             );
             result.0 as isize > 32
