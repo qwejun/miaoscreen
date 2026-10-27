@@ -16,3 +16,6 @@ signing/*.keystore
 
 # Live2D Cubism Core 为 Live2D 专有许可，不入库；获取方式见 README
 desktop/vendor/cubism/
+
+# 本地汇总的发布产物（走 GitHub Releases，不进历史）
+/dist/
