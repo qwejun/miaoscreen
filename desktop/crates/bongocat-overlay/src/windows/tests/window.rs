@@ -1,0 +1,374 @@
+//! The window class, its taskbar button, and correcting a saved box that left
+//! the desktop.
+
+use super::*;
+use crate::windows::window::window_is_above;
+use bongocat_runtime::OverlaySettings;
+
+#[test]
+fn window_mode_uses_model_client_size_when_switching_from_saved_pet_geometry() {
+    let canvas = CanvasInfo {
+        width: 2048.0,
+        height: 1188.0,
+        origin_x: 1024.0,
+        origin_y: 594.0,
+        pixels_per_unit: 1024.0,
+    };
+    let saved = OverlayWindowBounds::new(100, 100, 720, 308);
+    let pet = OverlayWindow::create(
+        OverlaySessionOptions::default(),
+        canvas,
+        Some(saved),
+        None,
+        None,
+    )
+    .unwrap();
+    let expected = crate::model_switch_window_bounds(saved, canvas);
+    assert_eq!(pet.bounds().unwrap(), expected);
+    for scale_percent in [25, 100, 200] {
+        let window = OverlayWindow::create(
+            OverlaySessionOptions {
+                window_mode: true,
+                scale_percent,
+                ..OverlaySessionOptions::default()
+            },
+            canvas,
+            Some(pet.bounds().unwrap()),
+            None,
+            None,
+        )
+        .unwrap();
+        assert_eq!(window.bounds().unwrap(), expected);
+        // SAFETY: this test owns the HWND and reads both rectangles on its
+        // creation thread. The title bar/border must be outside the model size.
+        unsafe {
+            let frame = window_frame_rect(window.hwnd, expected.width, expected.height).unwrap();
+            let mut outer = RECT::default();
+            GetWindowRect(window.hwnd, &mut outer).unwrap();
+            assert_eq!(outer.right - outer.left, frame.right - frame.left);
+            assert_eq!(outer.bottom - outer.top, frame.bottom - frame.top);
+            assert!(outer.right - outer.left > expected.width as i32);
+            assert!(outer.bottom - outer.top > expected.height as i32);
+        }
+    }
+}
+
+#[test]
+fn overlay_window_class_supports_overlapping_replacement_windows() {
+    let canvas = CanvasInfo {
+        width: 2048.0,
+        height: 2048.0,
+        origin_x: 1024.0,
+        origin_y: 1024.0,
+        pixels_per_unit: 1024.0,
+    };
+    let first = OverlayWindow::create(OverlaySessionOptions::default(), canvas, None, None, None)
+        .expect("create first overlay window");
+    let second = OverlayWindow::create(OverlaySessionOptions::default(), canvas, None, None, None)
+        .expect("reuse class for replacement overlay window");
+
+    assert_ne!(first.hwnd, second.hwnd);
+    drop(first);
+    drop(second);
+}
+
+#[test]
+fn overlay_window_creation_corrects_a_saved_box_off_the_desktop() {
+    let screens = screen_bounds_all();
+    let left_most = screens
+        .iter()
+        .min_by_key(|screen| screen.x)
+        .expect("at least one display");
+    let canvas = CanvasInfo {
+        width: 2_048.0,
+        height: 2_048.0,
+        origin_x: 1_024.0,
+        origin_y: 1_024.0,
+        pixels_per_unit: 1_024.0,
+    };
+    let candidate = OverlayWindowBounds::new(left_most.x - 10_000, left_most.y, 350, 350);
+    let expected = correction_for_screens(&screens, candidate).expect("a display to correct into");
+    let window = OverlayWindow::create(
+        OverlaySessionOptions::default(),
+        canvas,
+        Some(candidate),
+        None,
+        None,
+    )
+    .expect("create constrained overlay window");
+    let created = window.bounds().expect("constrained bounds");
+    assert_eq!(created, expected);
+    assert!(bounds_inside_screens(&screen_bounds_all(), created));
+}
+
+/// The `show_taskbar_icon` preference owns the model window's taskbar button,
+/// and the window is created with the saved value rather than being corrected
+/// after its first frame.
+#[test]
+fn overlay_window_owns_its_taskbar_button_at_creation() {
+    let canvas = CanvasInfo {
+        width: 2048.0,
+        height: 2048.0,
+        origin_x: 1024.0,
+        origin_y: 1024.0,
+        pixels_per_unit: 1024.0,
+    };
+    let shown = OverlayWindow::create(
+        OverlaySessionOptions {
+            taskbar_icon_visible: true,
+            ..OverlaySessionOptions::default()
+        },
+        canvas,
+        None,
+        None,
+        None,
+    )
+    .expect("create overlay window with a taskbar button");
+    assert!(shown.taskbar_icon_is_visible());
+
+    let hidden = OverlayWindow::create(
+        OverlaySessionOptions {
+            taskbar_icon_visible: false,
+            ..OverlaySessionOptions::default()
+        },
+        canvas,
+        None,
+        None,
+        None,
+    )
+    .expect("create overlay window without a taskbar button");
+    assert!(!hidden.taskbar_icon_is_visible());
+}
+
+/// Toggling the taskbar button in place must survive a model switch, which
+/// replaces the HWND, so the applied value is recorded on the session options
+/// the replacement window is created from.
+#[test]
+fn taskbar_toggle_preserves_unrelated_extended_styles_and_is_idempotent() {
+    let canvas = CanvasInfo {
+        width: 2048.0,
+        height: 2048.0,
+        origin_x: 1024.0,
+        origin_y: 1024.0,
+        pixels_per_unit: 1024.0,
+    };
+    let window = OverlayWindow::create(
+        OverlaySessionOptions {
+            click_through: true,
+            ..OverlaySessionOptions::default()
+        },
+        canvas,
+        None,
+        None,
+        None,
+    )
+    .expect("create overlay window");
+    let click_through = WS_EX_LAYERED.0 as isize | WS_EX_TRANSPARENT.0 as isize;
+    // SAFETY: the test owns the live HWND and reads its extended style on the
+    // creation thread.
+    let unrelated = unsafe { GetWindowLongPtrW(window.hwnd, GWL_EXSTYLE) } & click_through;
+    assert_eq!(unrelated, click_through);
+
+    window
+        .set_taskbar_icon_visible(true)
+        .expect("give the model window a taskbar button");
+    assert!(window.taskbar_icon_is_visible());
+    // A repeat is a no-op rather than a second style write.
+    window
+        .set_taskbar_icon_visible(true)
+        .expect("repeat the taskbar button write");
+    // SAFETY: the test owns the live HWND and reads its extended style on the
+    // creation thread.
+    let style = unsafe { GetWindowLongPtrW(window.hwnd, GWL_EXSTYLE) };
+    assert_eq!(style & click_through, click_through);
+    assert_eq!(
+        style & WS_EX_NOACTIVATE.0 as isize,
+        WS_EX_NOACTIVATE.0 as isize
+    );
+    assert_eq!(
+        style & WS_EX_NOREDIRECTIONBITMAP.0 as isize,
+        WS_EX_NOREDIRECTIONBITMAP.0 as isize
+    );
+
+    window
+        .set_taskbar_icon_visible(false)
+        .expect("take the model window's taskbar button away");
+    assert!(!window.taskbar_icon_is_visible());
+    // SAFETY: the test owns the live HWND and reads its extended style on the
+    // creation thread.
+    let style = unsafe { GetWindowLongPtrW(window.hwnd, GWL_EXSTYLE) };
+    assert_eq!(style & click_through, click_through);
+}
+
+/// The session keeps the applied value in its options, which is what a
+/// replacement window is created from, so a model switch cannot bring back a
+/// taskbar button the user turned off.
+#[test]
+fn session_options_carry_the_taskbar_button_into_a_replacement_window() {
+    // The shipped default leaves the button off, so the fallback options must
+    // not hand out a taskbar button no configuration asked for.
+    assert!(!OverlaySessionOptions::default().taskbar_icon_visible);
+    let options = OverlaySessionOptions {
+        taskbar_icon_visible: false,
+        ..OverlaySessionOptions::default()
+    };
+    // A runtime overlay settings change carries no taskbar field, so the
+    // applied value has to survive the projection onto the options.
+    let projected = options.with_runtime_settings(OverlaySettings::default());
+    assert!(!projected.taskbar_icon_visible);
+    // The taskbar button is applied in place, so it never forces the window to
+    // be replaced.
+    assert!(!options.requires_window_recreation(projected));
+}
+
+/// "Always on top" has to be a property of the window, not a value written once.
+///
+/// user32 documents the rule that decides membership in the topmost band: a
+/// topmost window that is repositioned after any non-topmost window is no longer
+/// topmost. Nothing reports that transition, and a window that left the band
+/// looks exactly like one whose setting was turned off — it sits behind the next
+/// window the user opens. The guard is the recovery path, so the test drives the
+/// demotion user32 performs and asserts the window comes back.
+#[test]
+fn a_demoted_model_window_returns_to_the_topmost_band() {
+    let canvas = CanvasInfo {
+        width: 2048.0,
+        height: 1188.0,
+        origin_x: 1024.0,
+        origin_y: 594.0,
+        pixels_per_unit: 1024.0,
+    };
+    let window = OverlayWindow::create(OverlaySessionOptions::default(), canvas, None, None, None)
+        .expect("create the model window");
+    assert!(window.is_topmost());
+    assert!(window.is_always_on_top());
+
+    // SAFETY: the test owns the live HWND on its creation thread, and the call
+    // only changes the window's place in the Z order.
+    unsafe {
+        SetWindowPos(
+            window.hwnd,
+            Some(HWND_NOTOPMOST),
+            0,
+            0,
+            0,
+            0,
+            SWP_NOACTIVATE | SWP_NOMOVE | SWP_NOSIZE,
+        )
+        .expect("demote the model window out of the topmost band");
+    }
+    assert!(!window.is_topmost());
+
+    window.ensure_topmost().expect("restore the topmost band");
+    assert!(window.is_topmost());
+    // A window that never left the band is left exactly where it is.
+    window
+        .ensure_topmost()
+        .expect("re-assert a window already on top");
+    assert!(window.is_topmost());
+}
+
+/// The guard must not fight the setting it enforces.
+///
+/// A user who turns "always on top" off gets an ordinary window, and the frame
+/// tick must not put it back into the band. The stored value is what both the
+/// tick and the show path read, so it has to follow every transition.
+#[test]
+fn turning_always_on_top_off_is_what_the_guard_follows() {
+    let canvas = CanvasInfo {
+        width: 2048.0,
+        height: 1188.0,
+        origin_x: 1024.0,
+        origin_y: 594.0,
+        pixels_per_unit: 1024.0,
+    };
+    let mut window = OverlayWindow::create(
+        OverlaySessionOptions {
+            always_on_top: false,
+            ..OverlaySessionOptions::default()
+        },
+        canvas,
+        None,
+        None,
+        None,
+    )
+    .expect("create the model window");
+    assert!(!window.is_topmost());
+    assert!(!window.is_always_on_top());
+
+    window
+        .set_always_on_top(true)
+        .expect("put the model window on top");
+    assert!(window.is_topmost());
+    assert!(window.is_always_on_top());
+
+    window
+        .set_always_on_top(false)
+        .expect("take the model window off the top");
+    assert!(!window.is_topmost());
+    assert!(!window.is_always_on_top());
+    window.ensure_topmost().expect("disabled guard is inert");
+    assert!(!window.is_topmost());
+}
+
+#[test]
+fn a_foreground_topmost_window_cannot_leave_the_model_behind_in_the_same_band() {
+    let canvas = CanvasInfo {
+        width: 2048.0,
+        height: 1188.0,
+        origin_x: 1024.0,
+        origin_y: 594.0,
+        pixels_per_unit: 1024.0,
+    };
+    let model = OverlayWindow::create(OverlaySessionOptions::default(), canvas, None, None, None)
+        .expect("create model");
+    let mut competitor =
+        OverlayWindow::create(OverlaySessionOptions::default(), canvas, None, None, None)
+            .expect("create simulated fullscreen foreground window");
+    model.show().unwrap();
+    competitor.show().unwrap();
+    let bounds = model.bounds().unwrap();
+    // No SetForegroundWindow: deterministic ordering tests must not steal focus
+    // from the developer or depend on user32's foreground activation permission.
+    for _ in 0..3 {
+        raise_for_test(&competitor);
+        assert!(model.is_topmost());
+        assert!(competitor.is_topmost());
+        assert!(window_is_above(competitor.hwnd, model.hwnd));
+        let foreground = unsafe { GetForegroundWindow() };
+        model.ensure_topmost_above(competitor.hwnd).unwrap();
+        assert!(window_is_above(model.hwnd, competitor.hwnd));
+        assert_eq!(model.bounds().unwrap(), bounds);
+        assert_eq!(unsafe { GetForegroundWindow() }, foreground);
+    }
+    // A popup above the model must stay above it when the foreground app is
+    // already below: the guard must not indiscriminately raise every frame.
+    let popup = OverlayWindow::create(OverlaySessionOptions::default(), canvas, None, None, None)
+        .expect("create simulated popup");
+    popup.show().unwrap();
+    raise_for_test(&popup);
+    assert!(window_is_above(popup.hwnd, model.hwnd));
+    model.ensure_topmost_above(competitor.hwnd).unwrap();
+    assert!(window_is_above(popup.hwnd, model.hwnd));
+    competitor.set_always_on_top(false).unwrap();
+    model.ensure_topmost_above(competitor.hwnd).unwrap();
+    assert!(window_is_above(popup.hwnd, model.hwnd));
+    assert!(!window_is_above(HWND::default(), model.hwnd));
+    assert!(!window_is_above(model.hwnd, model.hwnd));
+}
+
+fn raise_for_test(window: &OverlayWindow) {
+    // SAFETY: the test owns this live HWND on its creation thread; only z-order changes.
+    unsafe {
+        SetWindowPos(
+            window.hwnd,
+            Some(HWND_TOPMOST),
+            0,
+            0,
+            0,
+            0,
+            SWP_NOACTIVATE | SWP_NOMOVE | SWP_NOSIZE,
+        )
+        .unwrap();
+    }
+}

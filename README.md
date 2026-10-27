@@ -1,53 +1,50 @@
-# CatScreen
+# MiaoScreen（喵屏）
 
-把 Live2D 猫显示到 USB 连接的圆屏（MAGNEO C110001）上，电脑桌面不显示猫；键鼠和手柄仍然驱动猫的反应。
+把 Live2D 猫显示到一块 USB / Wi-Fi 连接的圆形屏幕（800×800）上，桌面端负责换模型、调设置，
+键鼠和手柄的输入实时驱动屏幕里的猫。
 
-本仓库是独立的圆屏显示项目，不复用也不修改桌面版 BongoCat 的应用层；它复用 BongoCat 仓库里的
-runtime、模型和输入 crate，模型资源也直接读取那边的 `resources/models`。
+这是一个自用的独立项目，围绕一款特定的小圆屏硬件打造，不追求通用性。
 
 ## 结构
 
 ```text
-publisher/   Rust 发布端：无窗口，读取 PC 输入，把每帧编码后通过 TCP 发出
-android/     Android 客户端：解析协议，用 GLES2 在圆屏上渲染
+desktop/     桌面客户端（Rust + GPUI）：设置界面、模型库、托盘、输入采集
+publisher/   无窗口发布端（Rust CLI）：读输入、编码帧、TCP 推流
+android/     圆屏设备端（纯 Java + GLES2，无 Gradle）：解析协议、渲染
 scripts/     构建与启动脚本
-scripts/dev/ 调试用探针（读窗口、截屏、只看协议不渲染）
-signing/     测试签名密钥（不入库）
+scripts/dev/ 调试探针（读协议流、截屏）
+patches/     对 desktop 的改动备份与说明
 ```
 
-## 依赖
-
-- 上游 BongoCat 检出放在本仓库旁边：`../kat`（默认路径，可用环境变量覆盖）。
-  - Rust crate 直接按路径引用 `../kat/crates/*`；
-  - 模型默认读 `../kat/resources/models`（`CATSCREEN_MODELS` 可覆盖）；
-  - Cubism Core 的 DLL 默认取 `../kat/vendor/cubism`（`CATSCREEN_VENDOR` 可覆盖）。
-- Rust 1.97.1。发布端用 GNU 工具链编译（`x86_64-pc-windows-gnu`），需要一份 mingw `gcc`。
-- Android 构建用 SDK 的 `aapt`、`d8`、`apksigner` 和 JDK 的 `javac`，不使用 Gradle，不联网。
-  默认路径写在 `scripts/build-apk.ps1` 参数里，机器不同就传参覆盖。
+`desktop/` 基于 [BongoCat](https://github.com/ayangweb/BongoCat)（Apache-2.0）改造：
+圆屏相关的 sink 与协议位于 `desktop/crates/bongocat-magneo/`，桌面窗口部分对本项目无用但未删除。
+相对上游的改动记录在 `patches/`。
 
 ## 运行
 
 ```powershell
-# 构建 APK（首次会生成 signing/kat.keystore）
+# 桌面客户端（带界面），--device-screen 指定监听地址
+.\desktop\target\debug\bongocat-app.exe --device-screen 0.0.0.0:7391
+
+# 无窗口发布端（命令行），可配信息条
+.\target\debug\miaoscreen.exe --model standard --address 0.0.0.0:7391 `
+    --banner "今天也要加油" --clock "{HH}:{mm}"
+
+# 设备端默认连 127.0.0.1:7391（配 adb reverse）；Wi-Fi 直连时：
+adb shell am start -n com.bongocat.catscreen/.MainActivity --es address 192.168.x.x:7391
+
+# 构建设备端 APK
 .\scripts\build-apk.ps1
 
-# 编译发布端并启动整条链路
+# 一键启动（USB + adb reverse 场景）
 .\scripts\start.ps1 -Build
-
-# 只切模型（已编译过）
-.\scripts\start.ps1 -Model keyboard
-
-# 全部停止
-.\scripts\start.ps1 -Stop
 ```
-
-`start.ps1` 会做四件事：检查设备在线、建立 `adb reverse tcp:7391 tcp:7391`、安装 APK、启动发布端
-和设备端 Activity。发布端先用 TCP 连上再发帧，断开后设备会自己重连，USB 掉了重新跑一次脚本即可。
 
 ## 协议
 
-`publisher/src/protocol.rs` 与 `android/java/com/bongocat/catscreen/Protocol.java` 是同一份格式的
-两端实现：小端、`kind: u8` + `length: u32` + payload，payload 以协议版本开头。
+`publisher/src/protocol.rs` 与 `desktop/crates/bongocat-magneo/src/protocol.rs` 是同一份格式的
+两份一致实现；设备端实现在 `android/java/com/bongocat/catscreen/Protocol.java`。
+小端、`kind: u8` + `length: u32` + payload，payload 以协议版本开头。
 
 | kind | 名称 | 作用 |
 | --- | --- | --- |
@@ -55,13 +52,18 @@ signing/     测试签名密钥（不入库）
 | 0x11 | RESOURCES | 纹理、背景、键位素材；模型换代时重发 |
 | 0x12 | FRAME | 一帧的 drawable、顶点、索引、启用的键 |
 | 0x13 | CLEAR | 清空画面（隐藏模型） |
+| 0x14 | OVERLAY | 底部信息条：时间/日期/标语的模板与排版 |
 
-设备端不保存模型状态：收到新 generation 的 RESOURCES 就重建纹理，其余时间只画最新的一帧，
-所以慢一帧只是丢一帧，不会累积延迟。
+设计要点：桌面端只发几何与模板，不栅格化；时钟占位符（`{HH}:{mm}` 等）由设备端用本地时钟
+展开，断链后时间照走；设备端无状态，慢一帧只是丢一帧，不累积延迟。
 
-## 现状与限制
+## 构建
 
-- 圆屏 800×800、57.6 Hz，当前实测约 42 fps（`adb logcat -d -s CatRenderer` 每秒一行）。
-- 没有设置界面：模型用命令行参数切换，配置不落盘。
-- 只支持 USB + `adb`：电脑侧要能跑 `adb reverse`，设备侧需要 `INTERNET` 权限。
-- 需要 Windows：发布端用的是 BongoCat 的 `WindowsInputService`（Raw Input）。
+- Rust 1.97（发布端用 GNU 工具链，需要 mingw `gcc`）。
+- Android：SDK 的 `aapt`、`d8`、`apksigner` + JDK 17 的 `javac`，不用 Gradle，不联网。
+  路径写在 `scripts/build-apk.ps1` 参数里，机器不同传参覆盖。
+
+## 许可
+
+`desktop/` 衍生自 BongoCat，遵循 [Apache-2.0](desktop/LICENSE)；本仓库其余部分同样以
+Apache-2.0 发布。

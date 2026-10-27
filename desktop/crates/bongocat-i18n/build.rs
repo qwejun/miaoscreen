@@ -1,0 +1,25 @@
+use std::{fs, path::Path};
+
+const CATALOGS: [&str; 8] = [
+    "locales/en-US.json",
+    "locales/zh-CN.json",
+    "locales/zh-TW.json",
+    "locales/ar-SA.json",
+    "locales/vi-VN.json",
+    "locales/pt-BR.json",
+    "locales/ko-KR.json",
+    "locales/fr-FR.json",
+];
+
+fn main() {
+    let mut fingerprint = 0xcbf29ce484222325_u64;
+    for catalog in CATALOGS {
+        println!("cargo:rerun-if-changed={catalog}");
+        let bytes = fs::read(Path::new(catalog)).expect("read localization catalog");
+        for byte in bytes {
+            fingerprint ^= u64::from(byte);
+            fingerprint = fingerprint.wrapping_mul(0x100000001b3);
+        }
+    }
+    println!("cargo:rustc-env=BONGOCAT_I18N_CATALOG_REVISION={fingerprint:016x}");
+}

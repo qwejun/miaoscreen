@@ -16,11 +16,20 @@ final class Scene {
 
     long generation;
 
+    /**
+     * The canvas in model space, which is what the picture is framed against.
+     *
+     * <p>A model's own bounds only cover the parts that move; the background and
+     * the key images are drawn across the whole canvas. Framing the moving parts
+     * instead crops the desk out of the picture, which on a square panel is the
+     * difference between the cat at its desk and a close-up of a cat.
+     */
+    float canvasMinX;
+    float canvasMaxX;
+    float canvasMinY;
+    float canvasMaxY;
+
     Bitmap background;
-    float backgroundMinX;
-    float backgroundMaxX;
-    float backgroundMinY;
-    float backgroundMaxY;
 
     int[] textureIds = new int[0];
     Bitmap[] textureImages = new Bitmap[0];

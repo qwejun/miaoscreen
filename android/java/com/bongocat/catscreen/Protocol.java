@@ -17,6 +17,11 @@ final class Protocol {
     static final int KIND_RESOURCES = 0x11;
     static final int KIND_FRAME = 0x12;
     static final int KIND_CLEAR = 0x13;
+    static final int KIND_OVERLAY = 0x14;
+    /** Host asks for (or stops asking for) snapshots of what the panel shows. */
+    static final int KIND_PREVIEW_CTRL = 0x15;
+    /** One snapshot, device to host: a JPEG of this panel's framebuffer. */
+    static final int KIND_PREVIEW_FRAME = 0x16;
 
     static final int VERSION = 1;
 
@@ -81,7 +86,23 @@ final class Protocol {
             while (read < count) {
                 int n = in.read(target, offset + read, count - read);
                 if (n < 0) {
-                    return read == 0;
+                    // End of stream. Returning true with zero bytes read is how
+                    // this client used to replay its last message forever: the
+                    // header buffer still held the previous one, so a closed
+                    // socket looked like an endless run of identical frames and
+                    // the reader never reconnected. A clean close is only clean
+                    // on a message boundary; anything else is a torn message.
+                    if (read == 0) {
+                        return false;
+                    }
+                    throw new EOFException("message truncated");
+                }
+                if (n == 0) {
+                    // A stream that is open but delivers nothing must not turn
+                    // this into a busy loop: the panel would freeze while the
+                    // reader burned a whole core, which is exactly how the first
+                    // version of this client failed.
+                    throw new IOException("stream stalled");
                 }
                 read += n;
             }

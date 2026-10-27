@@ -28,6 +28,8 @@ public final class MainActivity extends Activity {
     private TextView status;
     private PublisherClient client;
     private Thread clientThread;
+    private String clientStatus = "waiting for the publisher";
+    private String rendererStatus = "";
 
     @Override
     protected void onCreate(Bundle savedState) {
@@ -41,7 +43,9 @@ public final class MainActivity extends Activity {
         FrameLayout root = new FrameLayout(this);
         root.setBackgroundColor(Color.BLACK);
 
-        client = new PublisherClient();
+        // `--es address host:port` points the client at a publisher reached over
+        // the LAN; without it the loopback default is adb's reverse tunnel.
+        client = new PublisherClient(getIntent().getStringExtra("address"));
 
         surface = new GLSurfaceView(this);
         surface.setEGLContextClientVersion(2);
@@ -65,15 +69,14 @@ public final class MainActivity extends Activity {
                 + "  ·  Android " + Build.VERSION.RELEASE);
         root.addView(status, new FrameLayout.LayoutParams(-1, -2, Gravity.TOP));
 
-        renderer.setStats(new CatRenderer.Stats() {            @Override
+        renderer.setStats(new CatRenderer.Stats() {
+            @Override
             public void onStats(final String text, final boolean live) {
                 runOnUiThread(new Runnable() {
                     @Override
                     public void run() {
-                        status.setVisibility(live ? View.GONE : View.VISIBLE);
-                        if (!live) {
-                            status.setText(text);
-                        }
+                        rendererStatus = text;
+                        showStatus(live);
                     }
                 });
             }
@@ -85,10 +88,8 @@ public final class MainActivity extends Activity {
                 runOnUiThread(new Runnable() {
                     @Override
                     public void run() {
-                        status.setVisibility(live ? View.GONE : View.VISIBLE);
-                        if (!live) {
-                            status.setText("CatScreen\n" + text);
-                        }
+                        clientStatus = text;
+                        showStatus(live);
                     }
                 });
             }
@@ -133,6 +134,19 @@ public final class MainActivity extends Activity {
         super.onWindowFocusChanged(hasFocus);
         if (hasFocus) {
             hideSystemUi();
+        }
+    }
+
+    /**
+     * Shows the panel's only diagnostic surface: what the reader is doing and
+     * what the last frame was. Both halves matter — the reader knows whether the
+     * link is up, and the renderer knows how old the picture is — and neither can
+     * be read from a screenshot alone.
+     */
+    private void showStatus(boolean live) {
+        status.setVisibility(live ? View.GONE : View.VISIBLE);
+        if (!live) {
+            status.setText("CatScreen\n" + clientStatus + "\n" + rendererStatus);
         }
     }
 

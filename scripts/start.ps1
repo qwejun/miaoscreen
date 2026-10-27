@@ -23,7 +23,7 @@ $ErrorActionPreference = 'Stop'
 
 $repo = Split-Path $PSScriptRoot -Parent
 $package = 'com.bongocat.catscreen'
-$publisher = Join-Path $repo 'target\debug\catscreen.exe'
+$publisher = Join-Path $repo 'target\debug\miaoscreen.exe'
 $apk = Join-Path $repo 'android\build\CatScreen.apk'
 $minswg = 'C:\Users\wbj\Tools\mingw-portable\mingw64\bin'
 $cargoBin = Join-Path $env:USERPROFILE '.cargo\bin'
@@ -40,7 +40,7 @@ function Invoke-Adb {
 }
 
 function Stop-Publisher {
-    Get-Process catscreen -ErrorAction SilentlyContinue | ForEach-Object {
+    Get-Process miaoscreen -ErrorAction SilentlyContinue | ForEach-Object {
         $_.Kill()
         Write-Host "stopped publisher (pid $($_.Id))"
     }
@@ -64,7 +64,7 @@ if ($Build) {
     $env:CC = Join-Path $minswg 'gcc.exe'
     Push-Location $repo
     try {
-        cargo build -p catscreen
+        cargo build -p miaoscreen
         if ($LASTEXITCODE -ne 0) { throw 'publisher build failed' }
     } finally { Pop-Location }
 }

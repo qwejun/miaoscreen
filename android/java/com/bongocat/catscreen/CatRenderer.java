@@ -1,6 +1,10 @@
 package com.bongocat.catscreen;
 
 import android.graphics.Bitmap;
+import android.graphics.Canvas;
+import android.graphics.Paint;
+import android.graphics.PorterDuff;
+import android.graphics.Typeface;
 import android.opengl.GLES20;
 import android.opengl.GLSurfaceView;
 import android.opengl.GLUtils;
@@ -13,6 +17,9 @@ import java.nio.ByteOrder;
 import java.nio.FloatBuffer;
 import java.nio.ShortBuffer;
 import java.util.Arrays;
+import java.util.Calendar;
+import java.util.HashMap;
+import java.util.Map;
 
 import javax.microedition.khronos.egl.EGLConfig;
 import javax.microedition.khronos.opengles.GL10;
@@ -44,6 +51,16 @@ public final class CatRenderer implements GLSurfaceView.Renderer {
     private static final float MODEL_OPACITY_EPSILON = 0.0f;
 
     /**
+     * How long a frame stays current once it has been received.
+     *
+     * <p>The publisher streams at its own pace, so the panel expects several
+     * frames per tick of this clock. A second of silence is far outside that and
+     * far inside what a person notices, which is what makes it a usable
+     * threshold for calling the link dead.
+     */
+    private static final long STALE_AFTER_MS = 1000;
+
+    /**
      * Mask targets are rasterised at half the panel resolution.
      *
      * <p>A mask is coverage, not colour: it multiplies a drawable's opacity, and
@@ -62,6 +79,28 @@ public final class CatRenderer implements GLSurfaceView.Renderer {
      * clip cheap while a small one (an eye, a mouth) still gets half resolution.
      */
     private static final int MAX_MASK_TEXELS = 256;
+
+    /**
+     * The movement, in panel pixels, the cached-clip check ignores.
+     *
+     * <p>A clip is only re-rasterised when the geometry it is cut from moved by
+     * at least this much. One pixel is deliberately below what the mask's own
+     * half-resolution target can express, so a redraw this check skips could not
+     * have changed the mask anyway.
+     */
+    private static final float MASK_HASH_QUANTUM = 1f;
+
+    /**
+     * The step, in panel pixels, a mask target's size is rounded up to.
+     *
+     * <p>The target's scale is derived from its size, and a clip is only
+     * re-rasterised when that scale is unchanged, so a size that followed the
+     * geometry to the pixel made one pixel of jitter rebuild the clip and
+     * re-enter the framebuffer every single frame. Rounding the size up to a
+     * fixed step keeps the scale — and therefore the cache — stable while the
+     * cat is merely breathing.
+     */
+    private static final int MASK_TARGET_STEP = 16;
 
     private static final String VERTEX_SHADER =
             "attribute vec2 aPos;\n"
@@ -107,6 +146,19 @@ public final class CatRenderer implements GLSurfaceView.Renderer {
             + "uniform sampler2D uModelTex;\n"
             + "void main() {\n"
             + "    gl_FragColor = vec4(0.0, 0.0, 0.0, texture2D(uModelTex, vUv).a);\n"
+            + "}\n";
+
+    /**
+     * The bottom strip is one pre-rendered texture covering the band, so its
+     * fragment shader is a plain copy: everything the band shows was rasterised
+     * into a bitmap by this class once its text actually changed.
+     */
+    private static final String OVERLAY_FRAGMENT =
+            "precision mediump float;\n"
+            + "varying vec2 vUv;\n"
+            + "uniform sampler2D uModelTex;\n"
+            + "void main() {\n"
+            + "    gl_FragColor = texture2D(uModelTex, vUv);\n"
             + "}\n";
 
     private static final short[] QUAD_INDICES = {0, 1, 2, 0, 2, 3};
@@ -160,6 +212,8 @@ public final class CatRenderer implements GLSurfaceView.Renderer {
      */
     private boolean cleared;
     private final Frame frame = new Frame();
+    /** When the newest frame arrived, for telling a paused cat from a dead link. */
+    private long lastFrameNanos;
     private int[] order = new int[64];
 
     private ByteBuffer vertexByteBuffer;
@@ -182,6 +236,64 @@ public final class CatRenderer implements GLSurfaceView.Renderer {
     private boolean skipMasks;
     private boolean skipModel;
     private int forcedKeyId = -1;
+
+    /**
+     * How often the host gets a snapshot while its settings window is open.
+     *
+     * <p>Each snapshot costs a full-surface read back and a JPEG encode on this
+     * thread, so the rate is deliberately low: the preview is for judging layout
+     * and content, not for motion.
+     */
+    private static final long PREVIEW_INTERVAL_NANOS = 500_000_000L;
+    /** Snapshots travel at half the panel's resolution; the preview is ~360px. */
+    private static final int PREVIEW_SIZE = 400;
+    private static final int PREVIEW_QUALITY = 62;
+
+    private long lastPreviewNanos;
+    private int[] previewPixels;
+    private int[] previewRotated;
+
+    // ------------------------------------------------------------------ band
+    // The strip under the picture. Its layout rule: the picture keeps its
+    // centre while there is room, and is pushed up only once the band would
+    // cover its bottom edge. With the default 160px band and the 1.72:1 canvas
+    // the picture is untouched — the band lives in the black that was already
+    // there.
+
+    /** Clearance between the picture's bottom and the top of the band. */
+    private static final int BAND_BOTTOM_MARGIN_PX = 6;
+    /** Inset for left- and right-aligned strip text. */
+    private static final int BAND_TEXT_MARGIN_PX = 24;
+    private static final int BAND_DIVIDER_COLOR = 0x33FFFFFF;
+
+    /** The decorative Chinese face the panel's firmware ships. */
+    private static final String ROUNDED_FONT_PATH = "/system/fonts/FZLanTYJW-Regular.otf";
+    private static final String ROUNDED_BOLD_FONT_PATH = "/system/fonts/FZLanTYJW-Bold.otf";
+    private static final String[] WEEKDAYS =
+            {"周日", "周一", "周二", "周三", "周四", "周五", "周六"};
+
+    private Overlay overlay;
+    private int overlayProgram;
+    private int overlayPos;
+    private int overlayUv;
+    private int overlayScaleOffset;
+    private int overlayTex;
+
+    private Bitmap bandBitmap;
+    private Canvas bandCanvas;
+    private Paint bandPaint;
+    private int bandTexture;
+    private int bandWidth;
+    private int bandHeight;
+    private boolean bandDirty = true;
+    /** The second the strip was last repainted for; repainting twice in one
+     * second is wasted texture upload, so the paint decision is per second. */
+    private long bandSecond = -1;
+    private final String[] bandRendered = new String[Overlay.MAX_LINES];
+    private final String[] bandScratch = new String[Overlay.MAX_LINES];
+    private final Calendar bandCalendar = Calendar.getInstance();
+    /** GL-thread-only cache of fonts loaded from the panel's own filesystem. */
+    private static final Map<String, Typeface> TYPEFACE_CACHE = new HashMap<>();
 
     public CatRenderer(PublisherClient client) {
         this.client = client;
@@ -230,6 +342,12 @@ public final class CatRenderer implements GLSurfaceView.Renderer {
         maskScaleOffset = GLES20.glGetUniformLocation(maskProgram, "uScaleOffset");
         maskTex = GLES20.glGetUniformLocation(maskProgram, "uModelTex");
 
+        overlayProgram = buildProgram(VERTEX_SHADER, OVERLAY_FRAGMENT);
+        overlayPos = GLES20.glGetAttribLocation(overlayProgram, "aPos");
+        overlayUv = GLES20.glGetAttribLocation(overlayProgram, "aUv");
+        overlayScaleOffset = GLES20.glGetUniformLocation(overlayProgram, "uScaleOffset");
+        overlayTex = GLES20.glGetUniformLocation(overlayProgram, "uModelTex");
+
         blankTexture = createBlankTexture();
 
         Log.i(TAG, "GL_VERSION=" + GLES20.glGetString(GLES20.GL_VERSION));
@@ -249,6 +367,9 @@ public final class CatRenderer implements GLSurfaceView.Renderer {
         GLES20.glViewport(0, 0, viewWidth, viewHeight);
         // Mask targets are the size of the surface, so a resize invalidates them.
         releaseMaskTargets();
+        // The band bitmap is the width of the surface too, and the old texture
+        // belonged to the previous GL context if there was one.
+        releaseBand();
         Log.i(TAG, "SURFACE=" + width + "x" + height);
     }
 
@@ -258,6 +379,12 @@ public final class CatRenderer implements GLSurfaceView.Renderer {
         if (incoming != null) {
             applyScene(incoming);
         }
+        Overlay incomingOverlay = client.takeOverlay();
+        if (incomingOverlay != null) {
+            overlay = incomingOverlay;
+            bandSecond = -1;
+            bandDirty = true;
+        }
         if (client.takeCleared()) {
             haveFrame = false;
             cleared = true;
@@ -265,6 +392,7 @@ public final class CatRenderer implements GLSurfaceView.Renderer {
         if (client.copyFrameInto(frame)) {
             haveFrame = true;
             cleared = false;
+            lastFrameNanos = System.nanoTime();
             if (forcedKeyId >= 0) {
                 frame.appendKey(forcedKeyId);
             }
@@ -283,6 +411,10 @@ public final class CatRenderer implements GLSurfaceView.Renderer {
                 renderModel();
             }
         }
+        if (haveFrame && !cleared) {
+            renderOverlay();
+        }
+        maybeSendPreview();
         reportStats();
     }
 
@@ -381,6 +513,15 @@ public final class CatRenderer implements GLSurfaceView.Renderer {
         return name[0];
     }
 
+    /** Rounds a wanted target size up to {@link #MASK_TARGET_STEP}. */
+    private static int quantizeTarget(int pixels, int limit) {
+        if (pixels <= 0) {
+            return 0;
+        }
+        int rounded = ((pixels + MASK_TARGET_STEP - 1) / MASK_TARGET_STEP) * MASK_TARGET_STEP;
+        return Math.min(rounded, limit);
+    }
+
     /**
      * A mask target sized to the pixels its group can actually reach.
      *
@@ -440,12 +581,22 @@ public final class CatRenderer implements GLSurfaceView.Renderer {
 
     // ------------------------------------------------------------------ drawing
 
-    /** The clip-space transform the D3D11 and Metal backends use, verbatim. */
+    /**
+     * The clip-space transform the D3D11 and Metal backends use, verbatim.
+     *
+     * <p>The rectangle it frames is the canvas, not the model's own bounds: the
+     * desk and the key images are drawn across the canvas, and framing the moving
+     * parts alone pushes them off the edge of the panel.
+     */
     private void modelTransform() {
-        float modelWidth = Math.max(frame.maxX - frame.minX, 1e-6f);
-        float modelHeight = Math.max(frame.maxY - frame.minY, 1e-6f);
-        float centerX = (frame.minX + frame.maxX) * 0.5f;
-        float centerY = (frame.minY + frame.maxY) * 0.5f;
+        float minX = scene != null ? scene.canvasMinX : frame.minX;
+        float maxX = scene != null ? scene.canvasMaxX : frame.maxX;
+        float minY = scene != null ? scene.canvasMinY : frame.minY;
+        float maxY = scene != null ? scene.canvasMaxY : frame.maxY;
+        float modelWidth = Math.max(maxX - minX, 1e-6f);
+        float modelHeight = Math.max(maxY - minY, 1e-6f);
+        float centerX = (minX + maxX) * 0.5f;
+        float centerY = (minY + maxY) * 0.5f;
         float modelAspect = modelWidth / modelHeight;
         float viewportAspect = (float) viewWidth / (float) viewHeight;
 
@@ -457,6 +608,18 @@ public final class CatRenderer implements GLSurfaceView.Renderer {
             scaleY *= viewportAspect / modelAspect;
         }
 
+        // The band sits under the picture. While there is black to spare the
+        // picture keeps the centre it has always had — with the default band and
+        // the 1.72:1 canvas this is exactly the old layout — and only a band
+        // tall enough to reach the picture pushes it up, never down.
+        int band = overlay != null ? Math.max(0, overlay.bandPx) : 0;
+        float shiftPx = 0f;
+        if (band > 0) {
+            float picturePxH = modelHeight * scaleY * 0.5f * viewHeight;
+            float limitCenter = (viewHeight - band) - picturePxH * 0.5f - BAND_BOTTOM_MARGIN_PX;
+            shiftPx = Math.min(0f, limitCenter - viewHeight * 0.5f);
+        }
+
         float offsetX = -centerX * scaleX;
         if (frame.mirror) {
             scaleX = -scaleX;
@@ -465,7 +628,260 @@ public final class CatRenderer implements GLSurfaceView.Renderer {
         scaleOffset[0] = scaleX;
         scaleOffset[1] = scaleY;
         scaleOffset[2] = offsetX;
-        scaleOffset[3] = -centerY * scaleY;
+        scaleOffset[3] = -centerY * scaleY - 2f * shiftPx / viewHeight;
+    }
+
+    /**
+     * Draws the strip against the bottom edge of the panel.
+     *
+     * <p>The strip is one bitmap the width of the surface and the height of the
+     * band, uploaded as a texture whenever its rendered text actually changed.
+     * The repaint decision is per wall-clock second: a template with seconds
+     * repaints every second, one without repaints once a minute, and a static
+     * banner repaints never. Between repaints the draw is one textured quad.
+     */
+    private void renderOverlay() {
+        Overlay strip = overlay;
+        if (strip == null || strip.bandPx <= 0 || strip.lines.length == 0) {
+            return;
+        }
+        if (bandBitmap == null || bandWidth != viewWidth || bandHeight != strip.bandPx) {
+            rebuildBand(strip.bandPx);
+        }
+        long second = System.currentTimeMillis() / 1000L;
+        if (bandDirty || second != bandSecond) {
+            bandSecond = second;
+            if (repaintBand(strip)) {
+                GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, bandTexture);
+                GLUtils.texImage2D(GLES20.GL_TEXTURE_2D, 0, bandBitmap, 0);
+                bandDirty = false;
+            }
+        }
+        if (bandTexture == 0) {
+            return;
+        }
+        GLES20.glUseProgram(overlayProgram);
+        GLES20.glUniform4f(overlayScaleOffset, 1f, 1f, 0f, 0f);
+        GLES20.glUniform1i(overlayTex, 0);
+        GLES20.glEnable(GLES20.GL_BLEND);
+        blendNormal();
+        GLES20.glDisable(GLES20.GL_CULL_FACE);
+        GLES20.glActiveTexture(GLES20.GL_TEXTURE0);
+        GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, bandTexture);
+        // Clip-space y grows upwards, so the band's top edge is above -1.
+        float bandTop = -1f + 2f * strip.bandPx / viewHeight;
+        drawQuad(overlayPos, overlayUv, -1f, 1f, -1f, bandTop);
+    }
+
+    /** Allocates the band texture and its bitmap for the current surface. */
+    private void rebuildBand(int bandPx) {
+        releaseBandTexture();
+        if (bandBitmap != null) {
+            bandBitmap.recycle();
+        }
+        bandWidth = viewWidth;
+        bandHeight = bandPx;
+        bandBitmap = Bitmap.createBitmap(bandWidth, bandHeight, Bitmap.Config.ARGB_8888);
+        bandCanvas = new Canvas(bandBitmap);
+        if (bandPaint == null) {
+            bandPaint = new Paint();
+        }
+        int[] textures = new int[1];
+        GLES20.glGenTextures(1, textures, 0);
+        bandTexture = textures[0];
+        GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, bandTexture);
+        GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_MIN_FILTER, GLES20.GL_LINEAR);
+        GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_MAG_FILTER, GLES20.GL_LINEAR);
+        GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_WRAP_S, GLES20.GL_CLAMP_TO_EDGE);
+        GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_WRAP_T, GLES20.GL_CLAMP_TO_EDGE);
+        bandDirty = true;
+    }
+
+    private void releaseBand() {
+        releaseBandTexture();
+        if (bandBitmap != null) {
+            bandBitmap.recycle();
+            bandBitmap = null;
+        }
+        bandCanvas = null;
+        bandWidth = 0;
+        bandHeight = 0;
+        bandDirty = true;
+    }
+
+    private void releaseBandTexture() {
+        if (bandTexture != 0) {
+            int[] textures = {bandTexture};
+            GLES20.glDeleteTextures(1, textures, 0);
+            bandTexture = 0;
+        }
+    }
+
+    /**
+     * Rasterises the strip. Returns whether anything changed; the caller only
+     * uploads the texture then.
+     */
+    private boolean repaintBand(Overlay strip) {
+        bandCalendar.setTimeInMillis(System.currentTimeMillis());
+        boolean changed = false;
+        for (int i = 0; i < strip.lines.length; i++) {
+            bandScratch[i] = formatTemplate(strip.lines[i].text, bandCalendar);
+            String previous = bandRendered[i];
+            if (!bandScratch[i].equals(previous)) {
+                changed = true;
+            }
+        }
+        if (!changed) {
+            return false;
+        }
+        bandCanvas.drawColor(strip.background, PorterDuff.Mode.SRC);
+        if (strip.divider) {
+            bandPaint.setColor(BAND_DIVIDER_COLOR);
+            bandPaint.setTextAlign(Paint.Align.LEFT);
+            bandCanvas.drawRect(0f, 0f, bandWidth, 1f, bandPaint);
+        }
+        for (int i = 0; i < strip.lines.length; i++) {
+            Overlay.Line line = strip.lines[i];
+            bandRendered[i] = bandScratch[i];
+            bandPaint.setTypeface(typefaceFor(line));
+            bandPaint.setTextSize(line.sizePx);
+            bandPaint.setColor(line.color);
+            bandPaint.setAntiAlias(true);
+            bandPaint.setTextAlign(paintAlign(line.align));
+            // Vertical centring by hand: the baseline that puts the glyph box's
+            // centre on the line's own centre.
+            Paint.FontMetrics metrics = bandPaint.getFontMetrics();
+            float baseline = line.centerY - (metrics.ascent + metrics.descent) * 0.5f;
+            bandCanvas.drawText(bandRendered[i], paintX(line.align), baseline, bandPaint);
+        }
+        return true;
+    }
+
+    /** Substitutes the clock placeholders. Unknown fields pass through untouched. */
+    private static String formatTemplate(String template, Calendar calendar) {
+        if (template.indexOf('{') < 0) {
+            return template;
+        }
+        StringBuilder out = new StringBuilder(template.length() + 8);
+        int at = 0;
+        while (at < template.length()) {
+            int start = template.indexOf('{', at);
+            if (start < 0) {
+                out.append(template, at, template.length());
+                break;
+            }
+            int end = template.indexOf('}', start + 1);
+            if (end < 0) {
+                out.append(template, at, template.length());
+                break;
+            }
+            out.append(template, at, start);
+            appendField(out, template.substring(start + 1, end), calendar);
+            at = end + 1;
+        }
+        return out.toString();
+    }
+
+    private static void appendField(StringBuilder out, String field, Calendar calendar) {
+        switch (field) {
+            case "yyyy":
+                out.append(pad(calendar.get(Calendar.YEAR), 4));
+                break;
+            case "M":
+                out.append(calendar.get(Calendar.MONTH) + 1);
+                break;
+            case "MM":
+                out.append(pad(calendar.get(Calendar.MONTH) + 1, 2));
+                break;
+            case "dd":
+                out.append(pad(calendar.get(Calendar.DAY_OF_MONTH), 2));
+                break;
+            case "HH":
+                out.append(pad(calendar.get(Calendar.HOUR_OF_DAY), 2));
+                break;
+            case "mm":
+                out.append(pad(calendar.get(Calendar.MINUTE), 2));
+                break;
+            case "ss":
+                out.append(pad(calendar.get(Calendar.SECOND), 2));
+                break;
+            case "W":
+                out.append(WEEKDAYS[calendar.get(Calendar.DAY_OF_WEEK) - 1]);
+                break;
+            default:
+                out.append('{').append(field).append('}');
+                break;
+        }
+    }
+
+    private static String pad(int value, int width) {
+        String raw = Integer.toString(value);
+        if (raw.length() >= width) {
+            return raw;
+        }
+        StringBuilder out = new StringBuilder(width);
+        for (int i = raw.length(); i < width; i++) {
+            out.append('0');
+        }
+        return out.append(raw).toString();
+    }
+
+    private Typeface typefaceFor(Overlay.Line line) {
+        boolean bold = line.weight == Overlay.WEIGHT_BOLD;
+        int style = bold ? Typeface.BOLD : Typeface.NORMAL;
+        switch (line.font) {
+            case Overlay.FONT_ROUNDED: {
+                String path = bold ? ROUNDED_BOLD_FONT_PATH : ROUNDED_FONT_PATH;
+                Typeface face = loadTypeface(path);
+                if (face != null) {
+                    return face;
+                }
+                return Typeface.create(Typeface.SANS_SERIF, style);
+            }
+            case Overlay.FONT_MONO:
+                return Typeface.create(Typeface.MONOSPACE, style);
+            default:
+                return Typeface.create(Typeface.SANS_SERIF, style);
+        }
+    }
+
+    private static Typeface loadTypeface(String path) {
+        Typeface cached = TYPEFACE_CACHE.get(path);
+        if (cached != null) {
+            return cached;
+        }
+        try {
+            Typeface face = Typeface.createFromFile(path);
+            TYPEFACE_CACHE.put(path, face);
+            return face;
+        } catch (RuntimeException error) {
+            // The firmware's decorative face is a nice-to-have; sans-serif is
+            // always there and reads fine.
+            Log.w(TAG, "no typeface at " + path);
+            return null;
+        }
+    }
+
+    private static Paint.Align paintAlign(int align) {
+        switch (align) {
+            case Overlay.ALIGN_LEFT:
+                return Paint.Align.LEFT;
+            case Overlay.ALIGN_RIGHT:
+                return Paint.Align.RIGHT;
+            default:
+                return Paint.Align.CENTER;
+        }
+    }
+
+    private float paintX(int align) {
+        switch (align) {
+            case Overlay.ALIGN_LEFT:
+                return BAND_TEXT_MARGIN_PX;
+            case Overlay.ALIGN_RIGHT:
+                return bandWidth - BAND_TEXT_MARGIN_PX;
+            default:
+                return bandWidth * 0.5f;
+        }
     }
 
     /**
@@ -494,10 +910,12 @@ public final class CatRenderer implements GLSurfaceView.Renderer {
 
         for (int g = 0; g < groupCount; g++) {
             float[] bounds = groupBounds[g];
-            int requiredWidth = Math.min(viewWidth,
-                    (int) Math.ceil(bounds[2]) - (int) Math.floor(bounds[0]) + 2);
-            int requiredHeight = Math.min(viewHeight,
-                    (int) Math.ceil(bounds[3]) - (int) Math.floor(bounds[1]) + 2);
+            int requiredWidth = quantizeTarget(Math.min(viewWidth,
+                    (int) Math.ceil(bounds[2]) - (int) Math.floor(bounds[0]) + 2),
+                    viewWidth);
+            int requiredHeight = quantizeTarget(Math.min(viewHeight,
+                    (int) Math.ceil(bounds[3]) - (int) Math.floor(bounds[1]) + 2),
+                    viewHeight);
             if (requiredWidth <= 0 || requiredHeight <= 0) {
                 continue;
             }
@@ -659,13 +1077,23 @@ public final class CatRenderer implements GLSurfaceView.Renderer {
             int at = v * 4;
             float x = drawable.vertices[at];
             float y = drawable.vertices[at + 1];
-            hash = mix(hash, Float.floatToIntBits(x));
-            hash = mix(hash, Float.floatToIntBits(y));
 
             float clipX = x * scaleOffset[0] + scaleOffset[2];
             float clipY = y * scaleOffset[1] + scaleOffset[3];
             float pixelX = (clipX * 0.5f + 0.5f) * viewWidth;
             float pixelY = (clipY * 0.5f + 0.5f) * viewHeight;
+
+            // Hash the position in whole pixels, not the raw float bits. A clip
+            // is rasterised at MASK_SCALE of the panel, so a movement smaller
+            // than one texel cannot change a single pixel of the picture it
+            // produces — but hashing the raw bits made the idle breathing
+            // animation invalidate every clip on every frame, and re-rasterising
+            // them is exactly what kept this device at 42 fps instead of the
+            // panel's 57.6. Whole-pixel quantisation leaves a margin of a couple
+            // of texels, which is still below what the eye can see moving.
+            hash = mix(hash, Math.round(pixelX / MASK_HASH_QUANTUM));
+            hash = mix(hash, Math.round(pixelY / MASK_HASH_QUANTUM));
+
             if (pixelX < bounds[0]) {
                 bounds[0] = pixelX;
             }
@@ -726,8 +1154,8 @@ public final class CatRenderer implements GLSurfaceView.Renderer {
                 GLES20.glActiveTexture(GLES20.GL_TEXTURE0);
                 GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, texture);
                 drawQuad(modelPos, modelUv,
-                        scene.backgroundMinX, scene.backgroundMaxX,
-                        scene.backgroundMinY, scene.backgroundMaxY);
+                        scene.canvasMinX, scene.canvasMaxX,
+                        scene.canvasMinY, scene.canvasMaxY);
             }
         }
 
@@ -974,6 +1402,62 @@ public final class CatRenderer implements GLSurfaceView.Renderer {
 
     // -------------------------------------------------------------------- stats
 
+    /**
+     * Captures the panel and hands the JPEG to the client.
+     *
+     * <p>The host asked for this because the picture only exists here: the
+     * publisher never rasterises. Reading the framebuffer costs a few milliseconds
+     * on this GPU, which is why the interval is measured rather than tuned, and
+     * why nothing is captured when no host is listening.
+     */
+    private void maybeSendPreview() {
+        if (!client.isPreviewRequested() || viewWidth <= 0 || viewHeight <= 0) {
+            return;
+        }
+        long now = System.nanoTime();
+        if (now - lastPreviewNanos < PREVIEW_INTERVAL_NANOS) {
+            return;
+        }
+        lastPreviewNanos = now;
+
+        int width = viewWidth;
+        int height = viewHeight;
+        if (previewPixels == null || previewPixels.length != width * height) {
+            previewPixels = new int[width * height];
+            previewRotated = new int[width * height];
+        }
+
+        GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, 0);
+        java.nio.IntBuffer target = java.nio.IntBuffer.wrap(previewPixels);
+        GLES20.glReadPixels(0, 0, width, height, GLES20.GL_RGBA,
+                GLES20.GL_UNSIGNED_BYTE, target);
+
+        // glReadPixels is bottom-up and returns RGBA in memory order, while an
+        // ARGB_8888 bitmap is top-down with alpha in the high byte: one pass does
+        // the flip and the channel swap together.
+        for (int y = 0; y < height; y++) {
+            int source = (height - 1 - y) * width;
+            int destination = y * width;
+            for (int x = 0; x < width; x++) {
+                int rgba = previewPixels[source + x];
+                previewRotated[destination + x] = (rgba & 0xFF00FF00)
+                        | ((rgba & 0x000000FF) << 16)
+                        | ((rgba >> 16) & 0x000000FF);
+            }
+        }
+
+        Bitmap full = Bitmap.createBitmap(previewRotated, width, height,
+                Bitmap.Config.ARGB_8888);
+        Bitmap scaled = Bitmap.createScaledBitmap(full, PREVIEW_SIZE, PREVIEW_SIZE, true);
+        java.io.ByteArrayOutputStream out = new java.io.ByteArrayOutputStream(32 * 1024);
+        scaled.compress(Bitmap.CompressFormat.JPEG, PREVIEW_QUALITY, out);
+        if (scaled != full) {
+            scaled.recycle();
+        }
+        full.recycle();
+        client.sendPreview(out.toByteArray());
+    }
+
     private void reportStats() {
         frames++;
         long now = System.nanoTime();
@@ -985,10 +1469,19 @@ public final class CatRenderer implements GLSurfaceView.Renderer {
         frames = 0;
         windowStart = now;
 
-        boolean live = cleared || (haveFrame && scene != null);
-        String text = String.format("%s  %.1f fps  %.0fx%.0f  masks skipped %d  keys %d/%d",
+        // The publisher streams continuously, so silence is a dead link rather
+        // than an idle cat. Keeping the last frame on the panel is better than
+        // going black, but the picture has to stop claiming to be live: otherwise
+        // a broken tunnel looks exactly like a cat that happens to be sitting
+        // still, and there is nothing on the panel to diagnose it with.
+        long silentMillis = haveFrame ? (now - lastFrameNanos) / 1_000_000L : Long.MAX_VALUE;
+        boolean live = cleared || (haveFrame && scene != null && silentMillis < STALE_AFTER_MS);
+        String age = silentMillis == Long.MAX_VALUE
+                ? "no frame yet"
+                : String.format("frame %.1fs old", silentMillis / 1000f);
+        String text = String.format("%s  %.1f fps  %.0fx%.0f  masks skipped %d  keys %d/%d  %s",
                 live ? "CatScreen" : "waiting", fps, (float) viewWidth, (float) viewHeight,
-                skippedMasks, keysDrawn, keyMisses);
+                skippedMasks, keysDrawn, keyMisses, age);
         Log.i(TAG, text);
         skippedMasks = 0;
         keysDrawn = 0;

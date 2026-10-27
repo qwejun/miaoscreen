@@ -16,4 +16,4 @@
 pub mod protocol;
 
 mod sink;
-pub use sink::MagneoSink;
+pub use sink::{MagneoSink, MagneoHandle};

@@ -1,6 +1,10 @@
 [workspace]
 resolver = "3"
 members = ["publisher"]
+# `desktop/` is its own workspace root; without this entry cargo absorbs its
+# crates as members of this workspace and their `repository.workspace`
+# inheritance then resolves against the wrong root.
+exclude = ["desktop"]
 
 [workspace.package]
 version = "0.1.0"

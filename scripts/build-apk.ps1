@@ -42,7 +42,7 @@ if (-not (Test-Path $Keystore)) {
 }
 
 Write-Host "[1/6] resources + manifest + assets"
-& "$bt\aapt.exe" package -f -M "$proj\AndroidManifest.xml" -A "$proj\assets" -I $androidJar -F "$build\base.apk"
+& "$bt\aapt.exe" package -f -M "$proj\AndroidManifest.xml" -S "$proj\res" -A "$proj\assets" -I $androidJar -F "$build\base.apk"
 if ($LASTEXITCODE -ne 0) { throw 'aapt package failed' }
 
 Write-Host "[2/6] javac"

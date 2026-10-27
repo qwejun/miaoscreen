@@ -1,0 +1,1770 @@
+name: Verify
+
+on:
+  # Pull requests only.
+  #
+  # A `push: master` trigger was tried, so the base branch's cache scope would be
+  # filled and pull requests could restore from it. It did not pay off: the
+  # repository's 10 GB cache budget was already over (10.69 GB across 26
+  # entries), so the two largest entries were evicted as newer ones were written
+  # and the master scope never held them. Pull requests were cold either way, and
+  # the extra run after every merge only read as a second, unexplained
+  # verification. See ADR-0074 for the measurement.
+  pull_request:
+
+# A superseded run on the same ref can only burn runner minutes: its result is
+# replaced by the next push.
+concurrency:
+  group: verify-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  # Decides once whether this change can only have touched documentation, and is
+  # the only job that never skips. A skipped job reports as *skipped*, which
+  # satisfies a required check without hanging, so every job below is gated here
+  # rather than at the workflow level: a workflow-level `paths:` that matches
+  # nothing runs nothing at all, and the pull request then waits forever for a
+  # status that is never reported.
+  filter-paths:
+    name: Classify changed paths
+    runs-on: ubuntu-latest
+    outputs:
+      docs-only: ${{ steps.classify.outputs.docs-only }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          # The default shallow clone has no base branch in it, and an unreadable
+          # diff classifies as "not documentation", which runs everything — so a
+          # wrong depth costs time rather than coverage.
+          fetch-depth: 0
+      - name: Classify the change
+        id: classify
+        run: python3 tools/changed-paths.py
+      - name: Collect redacted failure evidence
+        if: ${{ failure() }}
+        shell: bash
+        run: python3 tools/collect-failure-evidence.py --input "$RUNNER_TEMP" --output "$RUNNER_TEMP/bongocat-failure-evidence" --platform "${{ runner.os }}"
+      - name: Upload redacted failure evidence
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: failure-evidence-filter-paths
+          path: ${{ runner.temp }}/bongocat-failure-evidence
+          if-no-files-found: error
+          retention-days: 7
+
+  toolchain:
+    name: Verify Rust toolchains
+    if: needs.filter-paths.outputs.docs-only != 'true'
+    needs: filter-paths
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v7
+      # `rust-toolchain.toml` pins 1.97.1, so a bare `cargo` here always resolves
+      # to the pinned toolchain and the stable check below silently repeated the
+      # minimum one. `+stable` and a separate target directory make the canary
+      # real, and keep the two compilers from invalidating each other's cache.
+      - name: Cache Cargo artifacts
+        uses: actions/cache@v6
+        with:
+          # Only this job's stable canary. The pinned toolchain gets no second
+          # copy: `rust-toolchain.toml` selects it for every other job, and the
+          # workspace job already compiles the whole workspace with it on both
+          # platforms, so building it again under a second target directory
+          # bought nothing.
+          path: |
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            target/toolchain-stable/
+          key: ${{ runner.os }}-toolchain-${{ hashFiles('Cargo.lock', 'Cargo.toml', 'rust-toolchain.toml') }}
+      - name: Check current stable toolchain
+        uses: dtolnay/rust-toolchain@stable
+      - name: Build workspace with current stable
+        run: cargo +stable check --manifest-path Cargo.toml --locked --workspace --target-dir target/toolchain-stable
+      - name: Collect redacted failure evidence
+        if: ${{ failure() }}
+        shell: bash
+        run: python3 tools/collect-failure-evidence.py --input "$RUNNER_TEMP" --output "$RUNNER_TEMP/bongocat-failure-evidence" --platform "${{ runner.os }}"
+      - name: Upload redacted failure evidence
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: failure-evidence-toolchain
+          path: ${{ runner.temp }}/bongocat-failure-evidence
+          if-no-files-found: error
+          retention-days: 7
+
+  fixtures:
+    name: Validate shared fixtures
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Install pinned schema validator
+        run: python3 -m pip install --disable-pip-version-check --requirement tools/requirements.txt
+      - name: Validate fixture structure and model cases
+        run: python3 tools/validate-fixtures.py
+      - name: Validate Draft 2020-12 schemas
+        run: python3 tools/validate-json-schema.py
+      - name: Validate locale keys and placeholders
+        run: python3 tools/validate-locales.py
+      - name: Run deterministic input fixtures
+        run: python3 tools/run-input-fixtures.py
+      - name: Run tool contract tests
+        run: python3 -m unittest discover -s tools/tests -p 'test_*.py'
+      - name: Check whitespace
+        run: git diff --check
+      - name: Collect redacted failure evidence
+        if: ${{ failure() }}
+        shell: bash
+        run: python3 tools/collect-failure-evidence.py --input "$RUNNER_TEMP" --output "$RUNNER_TEMP/bongocat-failure-evidence" --platform "${{ runner.os }}"
+      - name: Upload redacted failure evidence
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: failure-evidence-fixtures
+          path: ${{ runner.temp }}/bongocat-failure-evidence
+          if-no-files-found: error
+          retention-days: 7
+
+  dependency-policy:
+    name: Check dependency policy
+    if: needs.filter-paths.outputs.docs-only != 'true'
+    needs: filter-paths
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Cache Cargo artifacts
+        uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cargo/bin/cargo-deny
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+          key: ${{ runner.os }}-cargo-deny-0.20.2-${{ hashFiles('**/Cargo.lock', '**/Cargo.toml', 'deny.toml') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-deny-0.20.2-
+      - name: Install pinned cargo-deny
+        shell: bash
+        run: |
+          if ! cargo deny --version 2>/dev/null | grep -Fxq 'cargo-deny 0.20.2'; then
+            cargo install cargo-deny --version 0.20.2 --locked
+          fi
+      - name: Check licenses and dependency sources
+        run: ./tools/check-dependencies.sh
+      - name: Collect redacted failure evidence
+        if: ${{ failure() }}
+        shell: bash
+        run: python3 tools/collect-failure-evidence.py --input "$RUNNER_TEMP" --output "$RUNNER_TEMP/bongocat-failure-evidence" --platform "${{ runner.os }}"
+      - name: Upload redacted failure evidence
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: failure-evidence-dependency-policy
+          path: ${{ runner.temp }}/bongocat-failure-evidence
+          if-no-files-found: error
+          retention-days: 7
+
+  workspace:
+    name: Test workspace (${{ matrix.os }})
+    if: needs.filter-paths.outputs.docs-only != 'true'
+    needs: filter-paths
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.97.1
+          components: clippy, rustfmt
+      - uses: taiki-e/install-action@just
+        if: matrix.os == 'macos-latest'
+      - name: Cache Cargo artifacts
+        uses: actions/cache@v6
+        with:
+          # `target/release/` here holds only the metadata the two release
+          # `cargo check` steps produce, which is a few hundred MB against the
+          # gigabytes of code the smoke jobs link. Keeping it means the release
+          # check does not redo 189 crates on every run, and the product caches
+          # carry the codegen side.
+          path: |
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            target/debug/
+            target/release/
+          key: ${{ runner.os }}-workspace-${{ hashFiles('Cargo.lock', 'Cargo.toml', 'rust-toolchain.toml', 'crates/**/Cargo.toml') }}
+          restore-keys: |
+            ${{ runner.os }}-workspace-
+      - name: Check formatting
+        run: cargo fmt --manifest-path Cargo.toml --all -- --check
+      - name: Run Clippy
+        run: |
+          cargo clippy --manifest-path Cargo.toml --locked --workspace --all-targets --all-features --exclude bongocat-app -- -D warnings
+          cargo clippy --manifest-path Cargo.toml --locked -p bongocat-app --all-targets --features storage-test-injection -- -D warnings
+          cargo clippy --manifest-path Cargo.toml --locked -p bongocat-app --all-targets --features production -- -D warnings
+      - name: Run tests
+        run: cargo test --manifest-path Cargo.toml --locked --workspace
+      - name: Check release build
+        run: cargo check --manifest-path Cargo.toml --locked --workspace --release
+      - name: Check production environment build
+        run: cargo check --manifest-path Cargo.toml --locked -p bongocat-app --release --features production
+      - name: Record build provenance
+        shell: bash
+        run: |
+          python3 tools/record-provenance.py \
+            --workspace . \
+            --output "target/provenance/${RUNNER_OS}.json" \
+            --profile release \
+            --features default \
+            --environment development
+      - name: Upload build provenance
+        uses: actions/upload-artifact@v4
+        with:
+          name: provenance-${{ matrix.os }}
+          path: target/provenance/${{ runner.os }}.json
+          if-no-files-found: error
+      - name: Collect redacted failure evidence
+        if: ${{ failure() }}
+        shell: bash
+        run: python3 tools/collect-failure-evidence.py --input "$RUNNER_TEMP" --output "$RUNNER_TEMP/bongocat-failure-evidence" --platform "${{ runner.os }}"
+      - name: Upload redacted failure evidence
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: failure-evidence-workspace-${{ matrix.os }}
+          path: ${{ runner.temp }}/bongocat-failure-evidence
+          if-no-files-found: error
+          retention-days: 7
+
+  product-smoke:
+    name: Smoke product (${{ matrix.os }})
+    if: needs.filter-paths.outputs.docs-only != 'true'
+    needs: filter-paths
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.97.1
+          components: clippy, rustfmt
+      - name: Cache Cargo artifacts
+        uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            target/release/
+          key: ${{ runner.os }}-product-${{ hashFiles('Cargo.lock', 'Cargo.toml', 'rust-toolchain.toml', 'crates/**/Cargo.toml') }}
+          restore-keys: |
+            ${{ runner.os }}-product-
+      - name: Smoke Windows model directory picker
+        if: matrix.os == 'windows-latest'
+        shell: pwsh
+        timeout-minutes: 6
+        env:
+          RUST_BACKTRACE: full
+        run: |
+          cargo run --manifest-path Cargo.toml --locked --release -p bongocat-platform --example model_source_picker_smoke -- --expect-cancel --auto
+          if ($LASTEXITCODE -ne 0) {
+            exit $LASTEXITCODE
+          }
+          # A model source is recognised from its own content, so the harness takes
+          # no kind: a folder is what the picker asks for on both platforms.
+          cargo run --manifest-path Cargo.toml --locked --release -p bongocat-platform --example model_source_picker_smoke -- --expect-selected-any --auto
+          if ($LASTEXITCODE -ne 0) {
+            exit $LASTEXITCODE
+          }
+      - name: Smoke Windows D3D11 product overlay
+        if: matrix.os == 'windows-latest'
+        shell: pwsh
+        # This step owns the first release link of `bongocat-app` in this job,
+        # and `cargo check --release` in the workspace job produces metadata
+        # rather than code, so nothing warms the linker ahead of it. That build
+        # alone has run past 12 minutes on this runner, and the five 30-second
+        # product runs follow it. Budget the build and the runs, the way the
+        # storage-injection build below does.
+        timeout-minutes: 30
+        env:
+          RUST_BACKTRACE: full
+        run: |
+          cargo build --manifest-path Cargo.toml --locked -p bongocat-app --release
+          if ($LASTEXITCODE -ne 0) {
+            exit $LASTEXITCODE
+          }
+          $executable = Join-Path $PWD "target/release/bongocat-app.exe"
+          Add-Type -AssemblyName UIAutomationTypes
+          Add-Type -AssemblyName UIAutomationClient
+          function Find-UiAutomationElement {
+            param(
+              [System.Windows.Automation.AutomationElement] $Owner,
+              [System.Windows.Automation.TreeScope] $Scope,
+              [System.Windows.Automation.Condition] $Condition
+            )
+            try {
+              return $Owner.FindFirst($Scope, $Condition)
+            } catch {
+              # GPUI can rebuild its UIA subtree after a settings snapshot
+              # update. PowerShell commonly wraps the resulting COMException
+              # (including E_UNEXPECTED) in MethodInvocationException.
+              $exception = $_.Exception
+              while ($null -ne $exception) {
+                if ($exception -is [System.Runtime.InteropServices.COMException]) {
+                  if ($exception.HResult -eq -2147418113) {
+                    return $null
+                  }
+                  throw
+                }
+                $exception = $exception.InnerException
+              }
+              throw
+            }
+          }
+          $childrenScope = [System.Windows.Automation.TreeScope]::Children
+          1..5 | ForEach-Object {
+            $stdout = Join-Path $env:RUNNER_TEMP "bongocat-product-$_.stdout.log"
+            $stderr = Join-Path $env:RUNNER_TEMP "bongocat-product-$_.stderr.log"
+            $arguments = if ($_ -eq 1) {
+              @("--run-seconds", "30", "--settings-window-open-smoke")
+            } else {
+              @("--run-seconds", "30", "--settings-window-smoke", "--models-page-smoke")
+            }
+            $process = Start-Process `
+              -FilePath $executable `
+              -ArgumentList $arguments `
+              -NoNewWindow `
+              -PassThru `
+              -RedirectStandardOutput $stdout `
+              -RedirectStandardError $stderr
+            if ($_ -eq 1) {
+              $windowDeadline = [DateTime]::UtcNow.AddSeconds(10)
+              $processCondition = [System.Windows.Automation.PropertyCondition]::new(
+                [System.Windows.Automation.AutomationElement]::ProcessIdProperty,
+                $process.Id
+              )
+              $windowNameCondition = [System.Windows.Automation.PropertyCondition]::new(
+                [System.Windows.Automation.AutomationElement]::NameProperty,
+                "BongoCat Settings"
+              )
+              $settingsWindowCondition = [System.Windows.Automation.AndCondition]::new(
+                $processCondition,
+                $windowNameCondition
+              )
+              do {
+                Start-Sleep -Milliseconds 100
+                $process.Refresh()
+                if ($process.HasExited) {
+                  Get-Content $stdout, $stderr -ErrorAction SilentlyContinue
+                  throw "Windows product exited before UI Automation inspection"
+                }
+                $root = Find-UiAutomationElement `
+                  -Owner ([System.Windows.Automation.AutomationElement]::RootElement) `
+                  -Scope $childrenScope `
+                  -Condition $settingsWindowCondition
+              } while ($null -eq $root -and [DateTime]::UtcNow -lt $windowDeadline)
+              if ($null -eq $root) {
+                throw "Windows product did not expose a settings HWND"
+              }
+              # The settings window is the product behaviour this step verifies:
+              # the run opened it, as a real top-level window with this
+              # process behind it, and the bounded run below then finishes on its
+              # own. It deliberately stops there. Asserting a control's accessible
+              # name, control type, ARIA role and toggle pattern is an
+              # accessibility-tree assertion, which ADR-0054 rules out as a
+              # completion criterion for this product: the settings rows are plain
+              # labels and fields and carry no accessibility node of their own, and
+              # UIA is not a UI contract BongoCat owns. Accessibility behaviour is
+              # covered where it does exist, by the GPUI settings spike, against the
+              # components that actually carry it.
+            }
+            if (!$process.WaitForExit(60000)) {
+              Stop-Process -Id $process.Id -Force
+              Get-Content $stdout, $stderr -ErrorAction SilentlyContinue
+              throw "Windows product lifecycle smoke $_ exceeded 60 seconds"
+            }
+            Get-Content $stdout, $stderr -ErrorAction SilentlyContinue
+            if ($process.ExitCode -ne 0) {
+              exit $process.ExitCode
+            }
+          }
+      - name: Smoke macOS settings window lifecycle
+        if: matrix.os == 'macos-latest'
+        # First step to link `bongocat-app` in release in this job, so it pays
+        # for the whole build before its own eight-second run: 8.2 minutes of a
+        # 10 minute budget on a warm cache, and a cold one has no headroom left
+        # at all.
+        timeout-minutes: 30
+        run: cargo run --manifest-path Cargo.toml --locked -p bongocat-app --release -- --run-seconds 8 --settings-window-smoke --models-page-smoke
+      - name: Smoke hidden overlay model switching
+        if: matrix.os != 'ubuntu-latest'
+        timeout-minutes: 5
+        run: cargo run --manifest-path Cargo.toml --locked -p bongocat-app --release -- --run-seconds 20 --hidden-model-switch-smoke
+      - name: Smoke Windows single-instance wake
+        if: matrix.os == 'windows-latest'
+        shell: pwsh
+        timeout-minutes: 2
+        run: |
+          $executable = Join-Path $PWD "target/release/bongocat-app.exe"
+          $primaryStdout = Join-Path $env:RUNNER_TEMP "single-instance-primary.stdout.log"
+          $primaryStderr = Join-Path $env:RUNNER_TEMP "single-instance-primary.stderr.log"
+          $secondaryStdout = Join-Path $env:RUNNER_TEMP "single-instance-secondary.stdout.log"
+          $secondaryStderr = Join-Path $env:RUNNER_TEMP "single-instance-secondary.stderr.log"
+          $readyMarker = Join-Path $env:RUNNER_TEMP "single-instance-primary.ready"
+          $primaryResultMarker = Join-Path $env:RUNNER_TEMP "single-instance-primary.result"
+          $secondaryResultMarker = Join-Path $env:RUNNER_TEMP "single-instance-secondary.result"
+          Remove-Item `
+            $primaryStdout, $primaryStderr, $secondaryStdout, $secondaryStderr, `
+            $readyMarker, $primaryResultMarker, $secondaryResultMarker `
+            -Force `
+            -ErrorAction SilentlyContinue
+
+          $primary = Start-Process `
+            -FilePath $executable `
+            -ArgumentList @(
+              # The smoke waits half a second, then up to three to see its window
+              # destroyed, then up to five for the wake to deliver a snapshot. A
+              # ten second run could expire mid-poll and look like a failed wake.
+              "--run-seconds", "30",
+              "--single-instance-smoke",
+              "--single-instance-ready-file", $readyMarker,
+              "--single-instance-result-file", $primaryResultMarker
+            ) `
+            -NoNewWindow `
+            -PassThru `
+            -RedirectStandardOutput $primaryStdout `
+            -RedirectStandardError $primaryStderr
+          $readyDeadline = [DateTime]::UtcNow.AddSeconds(15)
+          do {
+            Start-Sleep -Milliseconds 100
+            $primary.Refresh()
+          } while (
+            -not (Test-Path $readyMarker -PathType Leaf) -and
+            -not $primary.HasExited -and
+            [DateTime]::UtcNow -lt $readyDeadline
+          )
+          if (-not (Test-Path $readyMarker -PathType Leaf)) {
+            Stop-Process -Id $primary.Id -Force -ErrorAction SilentlyContinue
+            $primary.WaitForExit()
+            Write-Host (Get-Content $primaryStdout -Raw -ErrorAction SilentlyContinue)
+            Write-Host (Get-Content $primaryStderr -Raw -ErrorAction SilentlyContinue)
+            throw "primary instance did not reach the hidden-window wake gate"
+          }
+          $readyStatus = (Get-Content $readyMarker -Raw).Trim()
+          if ($readyStatus -ne "single-instance primary ready") {
+            Stop-Process -Id $primary.Id -Force -ErrorAction SilentlyContinue
+            $primary.WaitForExit()
+            throw "primary instance wrote an unexpected ready status: $readyStatus"
+          }
+
+          $secondary = Start-Process `
+            -FilePath $executable `
+            -ArgumentList @(
+              "--run-seconds", "1",
+              "--single-instance-smoke",
+              "--single-instance-result-file", $secondaryResultMarker
+            ) `
+            -NoNewWindow `
+            -PassThru `
+            -RedirectStandardOutput $secondaryStdout `
+            -RedirectStandardError $secondaryStderr
+          if (-not $secondary.WaitForExit(10000)) {
+            Stop-Process -Id $secondary.Id -Force -ErrorAction SilentlyContinue
+            Stop-Process -Id $primary.Id -Force -ErrorAction SilentlyContinue
+            throw "secondary instance did not exit after notifying the primary"
+          }
+          Write-Host (Get-Content $secondaryStdout -Raw -ErrorAction SilentlyContinue)
+          Write-Host (Get-Content $secondaryStderr -Raw -ErrorAction SilentlyContinue)
+          if ($secondary.ExitCode -ne 0) {
+            Stop-Process -Id $primary.Id -Force -ErrorAction SilentlyContinue
+            throw "secondary instance exited with $($secondary.ExitCode)"
+          }
+          if (-not (Test-Path $secondaryResultMarker -PathType Leaf)) {
+            Stop-Process -Id $primary.Id -Force -ErrorAction SilentlyContinue
+            throw "secondary instance did not report a successful primary notification"
+          }
+          $secondaryStatus = (Get-Content $secondaryResultMarker -Raw).Trim()
+          if ($secondaryStatus -ne "secondary instance notified primary") {
+            Stop-Process -Id $primary.Id -Force -ErrorAction SilentlyContinue
+            throw "secondary instance wrote an unexpected result status: $secondaryStatus"
+          }
+
+          # Longer than the run duration above, so an orderly shutdown is what ends
+          # this wait rather than the bound being reached at the same moment.
+          if (-not $primary.WaitForExit(60000)) {
+            Stop-Process -Id $primary.Id -Force -ErrorAction SilentlyContinue
+            $primary.WaitForExit()
+            throw "primary instance did not finish ordered shutdown after the wake"
+          }
+          Write-Host (Get-Content $primaryStdout -Raw -ErrorAction SilentlyContinue)
+          Write-Host (Get-Content $primaryStderr -Raw -ErrorAction SilentlyContinue)
+          if ($primary.ExitCode -ne 0) {
+            throw "primary instance exited with $($primary.ExitCode)"
+          }
+          if (-not (Test-Path $primaryResultMarker -PathType Leaf)) {
+            throw "primary instance did not restore the existing settings window after the wake"
+          }
+          $primaryStatus = (Get-Content $primaryResultMarker -Raw).Trim()
+          if ($primaryStatus -ne "single-instance wake restored the settings window") {
+            throw "primary instance wrote an unexpected result status: $primaryStatus"
+          }
+      - name: Verify Windows executable product icon
+        if: matrix.os == 'windows-latest'
+        shell: pwsh
+        run: |
+          $executable = Join-Path $PWD "target/release/bongocat-app.exe"
+          Add-Type -TypeDefinition @'
+          using System;
+          using System.Runtime.InteropServices;
+
+          public static class BongoCatIconProbe
+          {
+              [DllImport("shell32.dll", CharSet = CharSet.Unicode)]
+              public static extern uint ExtractIconEx(
+                  string fileName,
+                  int iconIndex,
+                  IntPtr[] largeIcons,
+                  IntPtr[] smallIcons,
+                  uint iconCount);
+          }
+          '@
+          $iconCount = [BongoCatIconProbe]::ExtractIconEx(
+            $executable,
+            -1,
+            $null,
+            $null,
+            0)
+          if ($iconCount -lt 1) {
+            throw "Windows executable does not contain a product icon"
+          }
+      - name: Smoke native system menu lifecycle
+        if: matrix.os == 'windows-latest' || matrix.os == 'macos-latest'
+        # `cargo run` may still have work to do before the bounded ten-second run
+        # starts, so this needs a build's budget rather than the two minutes the
+        # steps that only execute an already-built binary get.
+        timeout-minutes: 10
+        run: cargo run --manifest-path Cargo.toml --locked -p bongocat-app --release -- --run-seconds 10 --system-menu-smoke
+      - name: Build isolated storage smoke executable
+        if: matrix.os != 'ubuntu-latest'
+        # `storage-test-injection` is a leaf feature of `bongocat-app`, so this
+        # used to share nothing with the build above and recompiled the whole
+        # release dependency graph into a second target directory: 14 minutes on
+        # Windows and 8 on macOS, per run. Building into the same directory
+        # relinks one crate instead, and the copy keeps the storage smokes on a
+        # binary of their own.
+        shell: bash
+        timeout-minutes: 30
+        run: |
+          cargo build --manifest-path Cargo.toml --locked -p bongocat-app --release --features storage-test-injection
+          mkdir -p target/storage-smoke
+          if [ -f target/release/bongocat-app.exe ]; then
+            cp target/release/bongocat-app.exe target/storage-smoke/bongocat-app.exe
+          else
+            cp target/release/bongocat-app target/storage-smoke/bongocat-app
+          fi
+      - name: Smoke macOS settings window state restore
+        if: matrix.os == 'macos-latest'
+        timeout-minutes: 2
+        run: |
+          set +e
+          output=$(target/storage-smoke/bongocat-app --settings-window-state-smoke 2>&1)
+          status=$?
+          set -e
+          printf '%s\n' "$output"
+          if ((status != 0)); then
+            exit "$status"
+          fi
+          grep -Fq 'bongocat-app: Chinese Appearance and language localization verified' <<<"$output"
+          grep -Fq 'bongocat-app: Chinese Model library localization verified' <<<"$output"
+          grep -Fq 'bongocat-app: settings window state restored after restart' <<<"$output"
+      - name: Smoke macOS release panic diagnostics
+        if: matrix.os == 'macos-latest'
+        timeout-minutes: 2
+        run: |
+          output=$(target/storage-smoke/bongocat-app --panic-diagnostics-smoke 2>&1)
+          printf '%s\n' "$output"
+          grep -Fq 'bongocat-app: panic diagnostics recovered after crash' <<<"$output"
+      - name: Smoke macOS diagnostics preview export
+        if: matrix.os == 'macos-latest'
+        timeout-minutes: 2
+        run: |
+          output=$(target/storage-smoke/bongocat-app --diagnostics-export-smoke 2>&1)
+          printf '%s\n' "$output"
+          grep -Fq 'bongocat-app: diagnostics export completed with a private preview bundle' <<<"$output"
+      - name: Smoke macOS diagnostics export filesystem failures
+        if: matrix.os == 'macos-latest'
+        timeout-minutes: 2
+        run: |
+          output=$(target/storage-smoke/bongocat-app --diagnostics-export-failure-smoke 2>&1)
+          printf '%s\n' "$output"
+          grep -Fq 'bongocat-app: diagnostics export filesystem failures preserved the previous bundle' <<<"$output"
+      - name: Smoke Windows settings window state restore
+        if: matrix.os == 'windows-latest'
+        shell: pwsh
+        timeout-minutes: 2
+        run: |
+          $executable = Join-Path $PWD "target/storage-smoke/bongocat-app.exe"
+          if (-not (Test-Path $executable)) {
+            throw "storage injection smoke executable was not built"
+          }
+          $stateStdout = Join-Path $env:RUNNER_TEMP "bongocat-settings-window-state.stdout.log"
+          $stateStderr = Join-Path $env:RUNNER_TEMP "bongocat-settings-window-state.stderr.log"
+          Remove-Item $stateStdout, $stateStderr -Force -ErrorAction SilentlyContinue
+          $stateProcess = Start-Process `
+            -FilePath $executable `
+            -ArgumentList @("--settings-window-state-smoke") `
+            -NoNewWindow `
+            -PassThru `
+            -RedirectStandardOutput $stateStdout `
+            -RedirectStandardError $stateStderr
+          if (-not $stateProcess.WaitForExit(20000)) {
+            Stop-Process -Id $stateProcess.Id -Force -ErrorAction SilentlyContinue
+            throw "Windows settings window state smoke exceeded 20 seconds"
+          }
+          $stateOutput = @(
+            Get-Content $stateStdout -Raw -ErrorAction SilentlyContinue
+            Get-Content $stateStderr -Raw -ErrorAction SilentlyContinue
+          ) -join "`n"
+          Write-Host $stateOutput
+          if ($stateProcess.ExitCode -ne 0) { throw "Windows settings window state smoke exited with $($stateProcess.ExitCode)" }
+          if (-not $stateOutput.Contains("bongocat-app: settings window state restored after restart")) {
+            throw "Windows settings window state smoke did not report restart restore"
+          }
+          if (-not $stateOutput.Contains("bongocat-app: Chinese Appearance and language localization verified")) {
+            throw "Windows settings window state smoke did not verify Chinese Appearance and language localization"
+          }
+          if (-not $stateOutput.Contains("bongocat-app: Chinese Model library localization verified")) {
+            throw "Windows settings window state smoke did not verify Chinese Models localization"
+          }
+      - name: Smoke Windows release panic diagnostics
+        if: matrix.os == 'windows-latest'
+        shell: pwsh
+        timeout-minutes: 2
+        run: |
+          $output = & target/storage-smoke/bongocat-app.exe --panic-diagnostics-smoke 2>&1 | Out-String
+          $exitCode = $LASTEXITCODE
+          Write-Host $output
+          if ($exitCode -ne 0) { exit $exitCode }
+          if (-not $output.Contains("bongocat-app: panic diagnostics recovered after crash")) {
+            throw "Windows panic diagnostics smoke did not report recovery"
+          }
+      - name: Smoke Windows diagnostics preview export
+        if: matrix.os == 'windows-latest'
+        shell: pwsh
+        timeout-minutes: 2
+        run: |
+          $output = & target/storage-smoke/bongocat-app.exe --diagnostics-export-smoke 2>&1 | Out-String
+          $exitCode = $LASTEXITCODE
+          Write-Host $output
+          if ($exitCode -ne 0) { exit $exitCode }
+          if (-not $output.Contains("bongocat-app: diagnostics export completed with a private preview bundle")) {
+            throw "Windows diagnostics export smoke did not report a private preview bundle"
+          }
+      - name: Smoke Windows diagnostics export filesystem failures
+        if: matrix.os == 'windows-latest'
+        shell: pwsh
+        timeout-minutes: 2
+        run: |
+          $output = & target/storage-smoke/bongocat-app.exe --diagnostics-export-failure-smoke 2>&1 | Out-String
+          $exitCode = $LASTEXITCODE
+          Write-Host $output
+          if ($exitCode -ne 0) { exit $exitCode }
+          if (-not $output.Contains("bongocat-app: diagnostics export filesystem failures preserved the previous bundle")) {
+            throw "Windows diagnostics export failure smoke did not preserve the previous bundle"
+          }
+      - name: Collect redacted failure evidence
+        if: ${{ failure() }}
+        shell: bash
+        run: python3 tools/collect-failure-evidence.py --input "$RUNNER_TEMP" --output "$RUNNER_TEMP/bongocat-failure-evidence" --platform "${{ runner.os }}"
+      - name: Upload redacted failure evidence
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: failure-evidence-product-${{ matrix.os }}
+          path: ${{ runner.temp }}/bongocat-failure-evidence
+          if-no-files-found: error
+          retention-days: 7
+
+  # The two packaging smokes each run `just build`, which releases the whole
+  # application for an explicit target triple. That is 13 minutes of the macOS
+  # chain and it shares no artifact with the product smokes, so it runs beside
+  # them instead of after them.
+  packaging-smoke:
+    name: Smoke macOS packaging
+    if: needs.filter-paths.outputs.docs-only != 'true'
+    needs: filter-paths
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.97.1
+          components: clippy, rustfmt
+      - uses: taiki-e/install-action@just
+      - name: Cache Cargo artifacts
+        uses: actions/cache@v6
+        with:
+          # `just build` releases for an explicit target triple, so this job owns
+          # `target/<triple>/` and nothing else. Caching the whole `target/`
+          # would store a second copy of the release tree the smoke jobs own.
+          path: |
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            target/*/release/
+          key: ${{ runner.os }}-packaging-${{ hashFiles('Cargo.lock', 'Cargo.toml', 'rust-toolchain.toml', 'crates/**/Cargo.toml') }}
+          restore-keys: |
+            ${{ runner.os }}-packaging-
+      - name: Reject an unknown macOS packaging environment
+        shell: bash
+        run: |
+          if just build --environment unknown --formats app; then
+            echo 'the packaging entry point accepted an unknown build environment' >&2
+            exit 1
+          fi
+          if just build --formats dmg2; then
+            echo 'the packaging entry point accepted an unknown artifact format' >&2
+            exit 1
+          fi
+      - name: Smoke macOS startup item lifecycle
+        run: |
+          just build --formats app
+          app_path=target/package/BongoCat.app
+          install_root=$(mktemp -d '/Applications/bongocat-startup-item-smoke.XXXXXX')
+          installed_app="$install_root/BongoCat.app"
+          stdout_path="$RUNNER_TEMP/macos-startup-item.stdout.log"
+          stderr_path="$RUNNER_TEMP/macos-startup-item.stderr.log"
+          cleanup() {
+            /System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister \
+              -u "$installed_app" >/dev/null 2>&1 || true
+            rm -rf "$install_root"
+          }
+          trap cleanup EXIT
+          ditto "$app_path" "$installed_app"
+          codesign --verify --deep --strict "$installed_app"
+          rm -f "$stdout_path" "$stderr_path"
+          open \
+            -n \
+            -o "$stdout_path" \
+            --stderr "$stderr_path" \
+            "$installed_app" \
+            --args \
+            --startup-item-smoke
+          restored=false
+          for _ in {1..120}; do
+            if grep -Fq 'bongocat-app: startup-item restored state' "$stdout_path"; then
+              restored=true
+              break
+            fi
+            if grep -Fq 'Error:' "$stderr_path"; then
+              break
+            fi
+            sleep 0.5
+          done
+          cat "$stdout_path" "$stderr_path" 2>/dev/null || true
+          grep -Fq 'bongocat-app: startup-item original state' "$stdout_path"
+          test "$restored" = true
+      - name: Smoke macOS application reopen lifecycle
+        # Reuses the Production bundle the startup-item step built, rather than
+        # releasing a second one for `--environment development`. The two
+        # bundles differ only in the compiled `BUILD_ENVIRONMENT` constant and
+        # the `environment` field of the bundle's provenance record: the reopen
+        # assertions below are the bundle id, the icon, the signature and the
+        # LaunchServices handshake, none of which read either, and
+        # `tools/tests/test_packaging_contract.py` already pins the
+        # environment-to-feature mapping. What this gave up is launching a
+        # Development bundle end to end in CI; that a bundle runs at all is still
+        # covered here, because the startup-item smoke above runs this one.
+        timeout-minutes: 30
+        run: |
+          app_path=target/package/BongoCat.app
+          if [ ! -d "$app_path" ]; then
+            echo "the packaging smoke left no bundle to reopen" >&2
+            exit 1
+          fi
+          stdout_path="$RUNNER_TEMP/macos-application-reopen.stdout.log"
+          stderr_path="$RUNNER_TEMP/macos-application-reopen.stderr.log"
+          rm -f "$stdout_path" "$stderr_path"
+          open \
+            -n \
+            -W \
+            -o "$stdout_path" \
+            --stderr "$stderr_path" \
+            "$app_path" \
+            --args \
+            --run-seconds 10 \
+            --application-reopen-smoke &
+          open_waiter=$!
+
+          ready=0
+          for _ in $(seq 1 150); do
+            if grep -Fq 'bongocat-app: application-reopen primary ready' "$stdout_path" 2>/dev/null; then
+              ready=1
+              break
+            fi
+            if ! kill -0 "$open_waiter" 2>/dev/null; then
+              break
+            fi
+            sleep 0.1
+          done
+          if [ "$ready" -ne 1 ]; then
+            cat "$stdout_path" "$stderr_path" 2>/dev/null || true
+            pkill -f -- "$app_path/Contents/MacOS/bongocat-app" || true
+            wait "$open_waiter" || true
+            printf '%s\n' 'macOS product did not reach the application-reopen gate' >&2
+            exit 1
+          fi
+
+          open "$app_path"
+          sleep 0.5
+          pid_path="$RUNNER_TEMP/macos-application-reopen.pids"
+          pgrep -f "$app_path/Contents/MacOS/bongocat-app" > "$pid_path" || true
+          process_count=$(wc -l < "$pid_path" | tr -d ' ')
+          if [ "$process_count" -ne 1 ]; then
+            pkill -f -- "$app_path/Contents/MacOS/bongocat-app" || true
+            wait "$open_waiter" || true
+            printf 'LaunchServices observed %s BongoCat processes after reopen\n' "$process_count" >&2
+            exit 1
+          fi
+
+          set +e
+          wait "$open_waiter"
+          open_status=$?
+          set -e
+          cat "$stdout_path" "$stderr_path" 2>/dev/null || true
+          if [ "$open_status" -ne 0 ]; then
+            exit "$open_status"
+          fi
+          grep -Fq \
+            'bongocat-app: application reopen restored the settings window' \
+            "$stdout_path"
+          test "$(plutil -extract CFBundleIdentifier raw -o - "$app_path/Contents/Info.plist")" = \
+            'com.ayangweb.bongo-cat'
+          test "$(plutil -extract CFBundleIconFile raw -o - "$app_path/Contents/Info.plist")" = \
+            'logo-macos.icns'
+          cmp \
+            resources/icons/logo-macos.icns \
+            "$app_path/Contents/Resources/logo-macos.icns"
+          codesign --verify --deep --strict "$app_path"
+      - name: Collect redacted failure evidence
+        if: ${{ failure() }}
+        shell: bash
+        run: python3 tools/collect-failure-evidence.py --input "$RUNNER_TEMP" --output "$RUNNER_TEMP/bongocat-failure-evidence" --platform "${{ runner.os }}"
+      - name: Upload redacted failure evidence
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: failure-evidence-packaging
+          path: ${{ runner.temp }}/bongocat-failure-evidence
+          if-no-files-found: error
+          retention-days: 7
+
+  windows-platform-smoke:
+    name: Smoke Windows platform release behaviour
+    if: needs.filter-paths.outputs.docs-only != 'true'
+    needs: filter-paths
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.97.1
+          components: clippy, rustfmt
+      - name: Restore Cargo artifacts
+        # Read-only on purpose: this job adds two test harnesses and one overlay
+        # binary to a release tree the `product-smoke` cache already holds, so
+        # storing it again would spend another 1.4 GB of the repository's 10 GB
+        # budget on a subset of the same artifacts.
+        uses: actions/cache/restore@v6
+        with:
+          path: |
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            target/release/
+          key: ${{ runner.os }}-product-${{ hashFiles('Cargo.lock', 'Cargo.toml', 'rust-toolchain.toml', 'crates/**/Cargo.toml') }}
+          restore-keys: |
+            ${{ runner.os }}-product-
+      - name: Smoke Windows startup item lifecycle
+        run: cargo test --manifest-path Cargo.toml --locked --release -p bongocat-platform windows_startup_item_registry_smoke_restores_original_value -- --ignored
+      - name: Smoke formal Windows missing-release recovery
+        run: cargo test --manifest-path Cargo.toml --locked -p bongocat-platform --lib --release windows::tests::synthetic_missing_release_is_reconciled_in_formal_runtime -- --ignored --exact
+      - name: Smoke transactional Windows D3D11 model switching
+        run: cargo run --manifest-path Cargo.toml --locked -p bongocat-overlay --release -- standard 0 --switch-cycles 3
+      - name: Collect redacted failure evidence
+        if: ${{ failure() }}
+        shell: bash
+        run: python3 tools/collect-failure-evidence.py --input "$RUNNER_TEMP" --output "$RUNNER_TEMP/bongocat-failure-evidence" --platform "${{ runner.os }}"
+      - name: Upload redacted failure evidence
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: failure-evidence-windows-platform
+          path: ${{ runner.temp }}/bongocat-failure-evidence
+          if-no-files-found: error
+          retention-days: 7
+  cubism-binding-contract:
+    name: Check Cubism binding generation contract
+    if: needs.filter-paths.outputs.docs-only != 'true'
+    needs: filter-paths
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Hash Rust toolchain
+        id: rust-toolchain
+        shell: python
+        run: |
+          import hashlib
+          import os
+          import subprocess
+
+          version = subprocess.check_output(["rustc", "-Vv"])
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
+              output.write(f"hash={hashlib.sha256(version).hexdigest()}\n")
+      - name: Cache Cargo artifacts
+        uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            tools/cubism-bindgen/target/
+          key: ${{ runner.os }}-cubism-bindgen-${{ steps.rust-toolchain.outputs.hash }}-${{ hashFiles('tools/cubism-bindgen/Cargo.lock', 'tools/cubism-bindgen/Cargo.toml', 'tools/cubism-core-probe/Cargo.lock', 'tools/cubism-core-probe/Cargo.toml') }}
+          restore-keys: |
+            ${{ runner.os }}-cubism-bindgen-${{ steps.rust-toolchain.outputs.hash }}-
+            ${{ runner.os }}-cubism-bindgen-
+      - name: Check formatting
+        run: cargo fmt --manifest-path tools/cubism-bindgen/Cargo.toml -- --check
+      - name: Run Clippy
+        run: cargo clippy --manifest-path tools/cubism-bindgen/Cargo.toml --locked --all-targets --all-features -- -D warnings
+      - name: Run tests
+        run: cargo test --manifest-path tools/cubism-bindgen/Cargo.toml --locked
+      - name: Check deterministic synthetic bindings
+        run: cargo run --manifest-path tools/cubism-bindgen/Cargo.toml --locked -- check-fixtures
+      - name: Compile Core probe against synthetic bindings
+        env:
+          BONGOCAT_CUBISM_BINDINGS: ${{ github.workspace }}/tools/cubism-bindgen/fixtures/expected/x86_64-pc-windows-msvc.rs
+        run: |
+          cargo fmt --manifest-path tools/cubism-core-probe/Cargo.toml -- --check
+          cargo clippy --manifest-path tools/cubism-core-probe/Cargo.toml --locked --all-targets --target-dir tools/cubism-bindgen/target/core-probe -- -D warnings
+          cargo check --manifest-path tools/cubism-core-probe/Cargo.toml --locked --release --target-dir tools/cubism-bindgen/target/core-probe
+      - name: Compile synthetic bindings for every Core target
+        shell: bash
+        run: |
+          rustup target add \
+            x86_64-pc-windows-msvc \
+            aarch64-apple-darwin \
+            x86_64-apple-darwin
+          output_directory=$(mktemp -d)
+          for target in \
+            x86_64-pc-windows-msvc \
+            aarch64-apple-darwin \
+            x86_64-apple-darwin; do
+            mkdir -p "$output_directory/$target"
+            rustc \
+              --crate-name cubism_core_synthetic \
+              --crate-type lib \
+              --edition 2024 \
+              --target "$target" \
+              --emit metadata \
+              -D warnings \
+              -A non_camel_case_types \
+              -A non_snake_case \
+              -A non_upper_case_globals \
+              "tools/cubism-bindgen/fixtures/expected/$target.rs" \
+              --out-dir "$output_directory/$target"
+          done
+      - name: Check release build
+        run: cargo check --manifest-path tools/cubism-bindgen/Cargo.toml --locked --release
+      - name: Collect redacted failure evidence
+        if: ${{ failure() }}
+        shell: bash
+        run: python3 tools/collect-failure-evidence.py --input "$RUNNER_TEMP" --output "$RUNNER_TEMP/bongocat-failure-evidence" --platform "${{ runner.os }}"
+      - name: Upload redacted failure evidence
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: failure-evidence-cubism-binding
+          path: ${{ runner.temp }}/bongocat-failure-evidence
+          if-no-files-found: error
+          retention-days: 7
+
+  contract-spikes:
+    name: Test ${{ matrix.name }}
+    if: needs.filter-paths.outputs.docs-only != 'true'
+    needs: filter-paths
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: input-state
+            manifest: spikes/input-state/Cargo.toml
+            workspace: spikes/input-state
+          - name: fixture-runner
+            manifest: spikes/fixture-runner/Cargo.toml
+            workspace: spikes/fixture-runner
+          - name: input-queue
+            manifest: spikes/input-queue/Cargo.toml
+            workspace: spikes/input-queue
+          - name: input-windows
+            manifest: spikes/input-windows/Cargo.toml
+            workspace: spikes/input-windows
+          - name: overlay-lifecycle
+            manifest: spikes/overlay-lifecycle/Cargo.toml
+            workspace: spikes/overlay-lifecycle
+          - name: overlay-windows
+            manifest: spikes/overlay-windows/Cargo.toml
+            workspace: spikes/overlay-windows
+          - name: config-store
+            manifest: spikes/config-store/Cargo.toml
+            workspace: spikes/config-store
+          - name: runtime-contract
+            manifest: spikes/runtime-contract/Cargo.toml
+            workspace: spikes/runtime-contract
+          - name: input-macos
+            manifest: spikes/input-macos/Cargo.toml
+            workspace: spikes/input-macos
+          # `spikes/model-package` is deliberately absent: the
+          # `model-package-platforms` job below runs it on both shipped
+          # platforms, which supersedes a Linux-only copy of the same checks.
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Hash Rust toolchain
+        id: rust-toolchain
+        shell: python
+        run: |
+          import hashlib
+          import os
+          import subprocess
+
+          version = subprocess.check_output(["rustc", "-Vv"])
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
+              output.write(f"hash={hashlib.sha256(version).hexdigest()}\n")
+      - name: Cache Cargo artifacts
+        uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            ${{ matrix.workspace }}/target/
+          key: ${{ runner.os }}-${{ matrix.name }}-${{ steps.rust-toolchain.outputs.hash }}-${{ hashFiles(matrix.manifest) }}-${{ hashFiles(format('{0}/Cargo.lock', matrix.workspace)) }}
+          restore-keys: |
+            ${{ runner.os }}-${{ matrix.name }}-${{ steps.rust-toolchain.outputs.hash }}-
+            ${{ runner.os }}-${{ matrix.name }}-
+      - name: Check formatting
+        run: cargo fmt --manifest-path ${{ matrix.manifest }} -- --check
+      - name: Run Clippy
+        run: cargo clippy --manifest-path ${{ matrix.manifest }} --locked --all-targets -- -D warnings
+      - name: Run tests
+        run: cargo test --manifest-path ${{ matrix.manifest }} --locked
+      - name: Collect redacted failure evidence
+        if: ${{ failure() }}
+        shell: bash
+        run: python3 tools/collect-failure-evidence.py --input "$RUNNER_TEMP" --output "$RUNNER_TEMP/bongocat-failure-evidence" --platform "${{ runner.os }}"
+      - name: Upload redacted failure evidence
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: failure-evidence-contract-${{ matrix.name }}
+          path: ${{ runner.temp }}/bongocat-failure-evidence
+          if-no-files-found: error
+          retention-days: 7
+
+  model-package-platforms:
+    name: Test model package on ${{ matrix.os }}
+    if: needs.filter-paths.outputs.docs-only != 'true'
+    needs: filter-paths
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - macos-latest
+          - windows-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Hash Rust toolchain
+        id: rust-toolchain
+        shell: python
+        run: |
+          import hashlib
+          import os
+          import subprocess
+
+          version = subprocess.check_output(["rustc", "-Vv"])
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
+              output.write(f"hash={hashlib.sha256(version).hexdigest()}\n")
+      - name: Cache Cargo artifacts
+        uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            spikes/model-package/target/
+          key: ${{ runner.os }}-model-package-${{ steps.rust-toolchain.outputs.hash }}-${{ hashFiles('spikes/model-package/Cargo.lock', 'spikes/model-package/Cargo.toml') }}
+          restore-keys: |
+            ${{ runner.os }}-model-package-${{ steps.rust-toolchain.outputs.hash }}-
+            ${{ runner.os }}-model-package-
+      - name: Check formatting
+        run: cargo fmt --manifest-path spikes/model-package/Cargo.toml -- --check
+      - name: Run Clippy
+        run: cargo clippy --manifest-path spikes/model-package/Cargo.toml --locked --all-targets --all-features -- -D warnings
+      - name: Run tests
+        run: cargo test --manifest-path spikes/model-package/Cargo.toml --locked
+      - name: Check release build
+        run: cargo check --manifest-path spikes/model-package/Cargo.toml --locked --release
+      - name: Collect redacted failure evidence
+        if: ${{ failure() }}
+        shell: bash
+        run: python3 tools/collect-failure-evidence.py --input "$RUNNER_TEMP" --output "$RUNNER_TEMP/bongocat-failure-evidence" --platform "${{ runner.os }}"
+      - name: Upload redacted failure evidence
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: failure-evidence-model-package-${{ matrix.os }}
+          path: ${{ runner.temp }}/bongocat-failure-evidence
+          if-no-files-found: error
+          retention-days: 7
+
+  macos-spikes:
+    name: Build macOS GPUI spikes
+    if: needs.filter-paths.outputs.docs-only != 'true'
+    needs: filter-paths
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Hash Rust toolchain
+        id: rust-toolchain
+        shell: python
+        run: |
+          import hashlib
+          import os
+          import subprocess
+
+          version = subprocess.check_output(["rustc", "-Vv"])
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
+              output.write(f"hash={hashlib.sha256(version).hexdigest()}\n")
+      - name: Cache Cargo artifacts
+        uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            spikes/gpui-settings/target/
+            spikes/gpui-overlay-macos/target/
+            spikes/input-macos/target/
+          key: ${{ runner.os }}-macos-spikes-${{ steps.rust-toolchain.outputs.hash }}-${{ hashFiles('spikes/gpui-settings/Cargo.lock', 'spikes/gpui-settings/Cargo.toml', 'spikes/gpui-overlay-macos/Cargo.lock', 'spikes/gpui-overlay-macos/Cargo.toml', 'spikes/input-macos/Cargo.lock', 'spikes/input-macos/Cargo.toml') }}
+          restore-keys: |
+            ${{ runner.os }}-macos-spikes-${{ steps.rust-toolchain.outputs.hash }}-
+            ${{ runner.os }}-macos-spikes-
+      - name: Check settings spike
+        run: cargo check --manifest-path spikes/gpui-settings/Cargo.toml --locked
+      - name: Check overlay spike
+        run: cargo check --manifest-path spikes/gpui-overlay-macos/Cargo.toml --locked
+      - name: Check macOS input spike
+        run: cargo check --manifest-path spikes/input-macos/Cargo.toml --locked
+      - name: Check GPUI spike formatting
+        run: |
+          cargo fmt --manifest-path spikes/gpui-settings/Cargo.toml -- --check
+          cargo fmt --manifest-path spikes/gpui-overlay-macos/Cargo.toml -- --check
+      - name: Check macOS input spike formatting
+        run: cargo fmt --manifest-path spikes/input-macos/Cargo.toml -- --check
+      - name: Run GPUI spike Clippy
+        run: |
+          cargo clippy --manifest-path spikes/gpui-settings/Cargo.toml --locked --all-targets -- -D warnings
+          cargo clippy --manifest-path spikes/gpui-overlay-macos/Cargo.toml --locked --all-targets -- -D warnings
+      - name: Run macOS input spike Clippy
+        run: cargo clippy --manifest-path spikes/input-macos/Cargo.toml --locked --all-targets -- -D warnings
+      - name: Run GPUI spike tests
+        run: |
+          cargo test --manifest-path spikes/gpui-settings/Cargo.toml --locked
+          cargo test --manifest-path spikes/gpui-overlay-macos/Cargo.toml --locked
+      - name: Run macOS input spike tests
+        run: cargo test --manifest-path spikes/input-macos/Cargo.toml --locked
+      # No `--release` pass over the spikes. These jobs smoke the *debug*
+      # executables they build below, so a release profile here produced
+      # artifacts nothing ever ran: 4.95 minutes in this job and about 3 in each
+      # Windows GPUI spike job. The product's release profile is covered by the
+      # workspace job's `cargo check --workspace --release` and by the real
+      # release build the product smoke jobs link.
+      - name: Build macOS settings smoke executable
+        timeout-minutes: 10
+        run: cargo build --manifest-path spikes/gpui-settings/Cargo.toml --locked
+      - name: Smoke macOS GPUI settings lifecycle
+        timeout-minutes: 2
+        run: |
+          python3 - <<'PY'
+          import pathlib
+          import subprocess
+
+          executable = pathlib.Path("spikes/gpui-settings/target/debug/bongocat-gpui-settings-spike")
+          completed = subprocess.run(
+              [
+                  str(executable),
+                  "--auto-quit-ms",
+                  "6000",
+                  "--menu-probe",
+                  "--tooltip-probe",
+              ],
+              capture_output=True,
+              check=False,
+              text=True,
+              timeout=30,
+          )
+          output = completed.stdout + "\n" + completed.stderr
+          print(output)
+          if completed.returncode != 0:
+              raise RuntimeError(
+                  f"macOS GPUI settings smoke exited with {completed.returncode}"
+              )
+          for expected in (
+              "window opened",
+              "first frame elapsed_ms=",
+              "scale_factor=",
+              "runtime snapshot revision=1",
+              "native menu edit actions verified",
+              "native tooltip hover entered",
+              "tooltip built after hover delay",
+              "tooltip hover delay and exit verified",
+              "runtime stopped",
+              "stopped",
+          ):
+              if expected not in output:
+                  raise RuntimeError(
+                      f"macOS GPUI settings smoke did not report: {expected}"
+                  )
+          if output.index("gpui-settings-spike: runtime stopped") >= output.index(
+              "gpui-settings-spike: stopped"
+          ):
+              raise RuntimeError("runtime did not stop before macOS application shutdown")
+          PY
+      - name: Build macOS overlay smoke executable
+        timeout-minutes: 10
+        run: cargo build --manifest-path spikes/gpui-overlay-macos/Cargo.toml --locked
+      - name: Smoke independent AppKit and Metal overlay
+        timeout-minutes: 3
+        run: |
+          python3 - <<'PY'
+          import pathlib
+          import re
+          import subprocess
+
+          executable = pathlib.Path("spikes/gpui-overlay-macos/target/debug/bongocat-gpui-overlay-macos-spike")
+
+          def run_smoke(name, arguments):
+              # The 100-cycle path waits for AppKit/Metal teardown on every cycle;
+              # keep a bounded subprocess timeout without racing the workflow step.
+              timeout_seconds = 90 if "--macos-overlay-cycles" in arguments else 30
+              try:
+                  completed = subprocess.run(
+                      [str(executable), *arguments],
+                      capture_output=True,
+                      check=False,
+                      text=True,
+                      timeout=timeout_seconds,
+                  )
+              except subprocess.TimeoutExpired as error:
+                  output = (error.stdout or "") + "\n" + (error.stderr or "")
+                  print(output)
+                  raise RuntimeError(
+                      f"{name} overlay smoke exceeded {timeout_seconds} seconds"
+                  ) from error
+              output = completed.stdout + "\n" + completed.stderr
+              print(output)
+              if completed.returncode != 0:
+                  raise RuntimeError(
+                      f"{name} overlay smoke exited with {completed.returncode}"
+                  )
+              return output
+
+          normal = run_smoke("normal", ["--auto-quit-ms", "1200"])
+          for expected in (
+              "macOS native overlay created",
+              "macOS interaction mode=drag",
+              "macOS overlay drag contract verified delta=24x18",
+              "macOS interaction mode=click-through",
+              "non-empty premultiplied-alpha draw/present submitted",
+              "frame source started target_hz=60",
+              "macOS overlay resized width=400 height=300",
+              "overlay hidden",
+              "GPUI settings window opened",
+              "auto quit requested",
+              "frame source stopped frames=",
+              "resize_completed=true",
+              "overlay window/GPU owner released",
+          ):
+              if expected not in normal:
+                  raise RuntimeError(f"normal overlay smoke did not report: {expected}")
+          frame_stop = normal.index("frame source stopped frames=")
+          owner_release = normal.index("overlay window/GPU owner released")
+          if owner_release <= frame_stop:
+              raise RuntimeError("overlay owner released before frame source stopped")
+
+          backing_reconcile = run_smoke(
+              "backing-reconcile",
+              ["--simulate-macos-stale-drawable-size", "--auto-quit-ms", "900"],
+          )
+          for expected in (
+              "simulated stale macOS drawable size",
+              "macOS drawable size reconciled from=1x1 to=",
+              "non-empty premultiplied-alpha draw/present submitted",
+          ):
+              if expected not in backing_reconcile:
+                  raise RuntimeError(
+                      f"backing-reconcile overlay smoke did not report: {expected}"
+                  )
+
+          degraded = run_smoke(
+              "drawable-unavailable",
+              ["--simulate-macos-drawable-unavailable", "--auto-quit-ms", "900"],
+          )
+          for expected in (
+              "overlay degraded error=simulated CAMetalLayer drawable unavailable",
+              "GPUI settings window opened",
+              "auto quit requested",
+              "overlay window/GPU owner released",
+          ):
+              if expected not in degraded:
+                  raise RuntimeError(
+                      f"drawable-unavailable overlay smoke did not report: {expected}"
+                  )
+
+          recovered = run_smoke(
+              "renderer-recovery",
+              [
+                  "--simulate-renderer-loss-at-frame",
+                  "12",
+                  "--auto-quit-ms",
+                  "1600",
+              ],
+          )
+          for expected in (
+              "frame degraded kind=device_lost error=simulated renderer device loss",
+              "frame renderer recovered attempt=1",
+              "settings overlay status=GPUI settings + native overlay (recovered)",
+              "failures=1 recoveries=1",
+          ):
+              if expected not in recovered:
+                  raise RuntimeError(
+                      f"renderer-recovery overlay smoke did not report: {expected}"
+                  )
+          degraded_at = recovered.index("frame degraded kind=device_lost")
+          released_at = recovered.index("overlay window/GPU owner released", degraded_at)
+          recovered_at = recovered.index("frame renderer recovered attempt=1")
+          if not degraded_at < released_at < recovered_at:
+              raise RuntimeError("macOS renderer was recreated before the failed owner released")
+
+          cycles = run_smoke("cycles", ["--macos-overlay-cycles", "100"])
+          for expected in (
+              "macOS cycles=100",
+              "non_empty_frames=",
+              "threads_before=",
+              "threads_after=",
+              "threads_baseline_high_water=",
+              "measurement_batches=",
+              "metal_bytes_before=",
+              "metal_bytes_after=",
+              "clean_shutdown=true",
+          ):
+              if expected not in cycles:
+                  raise RuntimeError(f"overlay cycle smoke did not report: {expected}")
+          cycle_metrics = re.search(
+              r"macOS cycles=100 non_empty_frames=(\d+).*measurement_batches=(\d+)",
+              cycles,
+          )
+          if cycle_metrics is None:
+              raise RuntimeError("overlay cycle smoke metrics were not parseable")
+          non_empty_frames, measurement_batches = map(int, cycle_metrics.groups())
+          if not 3 <= measurement_batches <= 6:
+              raise RuntimeError("overlay cycle smoke used an invalid measurement batch count")
+          if non_empty_frames != 100 * measurement_batches:
+              raise RuntimeError("overlay cycle smoke frame accounting did not balance")
+          PY
+      - name: Collect redacted failure evidence
+        if: ${{ failure() }}
+        shell: bash
+        run: python3 tools/collect-failure-evidence.py --input "$RUNNER_TEMP" --output "$RUNNER_TEMP/bongocat-failure-evidence" --platform "${{ runner.os }}"
+      - name: Upload redacted failure evidence
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: failure-evidence-macos-spikes
+          path: ${{ runner.temp }}/bongocat-failure-evidence
+          if-no-files-found: error
+          retention-days: 7
+
+  windows-input-spike:
+    name: Smoke Windows input and config services
+    if: needs.filter-paths.outputs.docs-only != 'true'
+    needs: filter-paths
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Hash Rust toolchain
+        id: rust-toolchain
+        shell: python
+        run: |
+          import hashlib
+          import os
+          import subprocess
+
+          version = subprocess.check_output(["rustc", "-Vv"])
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
+              output.write(f"hash={hashlib.sha256(version).hexdigest()}\n")
+      - name: Cache Cargo artifacts
+        uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            spikes/input-windows/target/
+            spikes/config-store/target/
+          key: ${{ runner.os }}-input-config-windows-${{ steps.rust-toolchain.outputs.hash }}-${{ hashFiles('spikes/input-windows/Cargo.lock', 'spikes/input-windows/Cargo.toml', 'spikes/input-queue/Cargo.lock', 'spikes/input-queue/Cargo.toml', 'spikes/config-store/Cargo.lock', 'spikes/config-store/Cargo.toml') }}
+          restore-keys: |
+            ${{ runner.os }}-input-config-windows-${{ steps.rust-toolchain.outputs.hash }}-
+            ${{ runner.os }}-input-config-windows-
+      - name: Check Windows build
+        run: cargo check --manifest-path spikes/input-windows/Cargo.toml --locked
+      - name: Run Windows Clippy
+        run: cargo clippy --manifest-path spikes/input-windows/Cargo.toml --locked --all-targets -- -D warnings
+      - name: Run Windows tests
+        run: cargo test --manifest-path spikes/input-windows/Cargo.toml --locked
+      - name: Smoke Raw Input registration and shutdown
+        run: cargo run --manifest-path spikes/input-windows/Cargo.toml --locked -- --register-smoke-ms 100
+      - name: Smoke Windows gilrs gamepad context startup and shutdown (no-device)
+        run: cargo run --manifest-path Cargo.toml --locked -p bongocat-platform --example gilrs_gamepad_smoke
+      - name: Smoke Windows key-state reconciliation query
+        run: cargo run --manifest-path spikes/input-windows/Cargo.toml --locked -- --key-state-smoke
+      - name: Smoke Windows mouse-button reconciliation query
+        run: cargo run --manifest-path spikes/input-windows/Cargo.toml --locked -- --mouse-button-state-smoke
+      - name: Smoke Windows reconciliation scheduler
+        run: cargo run --manifest-path spikes/input-windows/Cargo.toml --locked -- --reconcile-smoke-ms 600
+      - name: Smoke synthetic Raw Input release recovery
+        run: cargo run --manifest-path spikes/input-windows/Cargo.toml --locked -- --synthetic-release-recovery-ms 800
+      - name: Smoke Windows capture queue overflow recovery
+        run: cargo run --manifest-path spikes/input-windows/Cargo.toml --locked -- --queue-overflow-smoke-ms 100
+      - name: Pressure synthetic Raw Input edges
+        run: cargo run --manifest-path spikes/input-windows/Cargo.toml --locked --release -- --synthetic-edge-pressure-cycles 128
+      - name: Pressure keyboard edges under pointer flood
+        run: cargo run --manifest-path spikes/input-windows/Cargo.toml --locked --release -- --synthetic-pointer-flood-cycles 128
+      - name: Smoke Windows session and power resets
+        run: cargo run --manifest-path spikes/input-windows/Cargo.toml --locked -- --lifecycle-smoke-ms 100
+      - name: Test Windows config storage layout
+        run: cargo test --manifest-path spikes/config-store/Cargo.toml --locked
+      - name: Collect redacted failure evidence
+        if: ${{ failure() }}
+        shell: bash
+        run: python3 tools/collect-failure-evidence.py --input "$RUNNER_TEMP" --output "$RUNNER_TEMP/bongocat-failure-evidence" --platform "${{ runner.os }}"
+      - name: Upload redacted failure evidence
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: failure-evidence-windows-input
+          path: ${{ runner.temp }}/bongocat-failure-evidence
+          if-no-files-found: error
+          retention-days: 7
+
+  windows-gpui-spikes:
+    name: Build Windows GPUI ${{ matrix.name }} spike
+    if: needs.filter-paths.outputs.docs-only != 'true'
+    needs: filter-paths
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: settings
+            manifest: spikes/gpui-settings/Cargo.toml
+            workspace: spikes/gpui-settings
+          - name: overlay
+            manifest: spikes/gpui-overlay-macos/Cargo.toml
+            workspace: spikes/gpui-overlay-macos
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Hash Rust toolchain
+        id: rust-toolchain
+        shell: python
+        run: |
+          import hashlib
+          import os
+          import subprocess
+
+          version = subprocess.check_output(["rustc", "-Vv"])
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
+              output.write(f"hash={hashlib.sha256(version).hexdigest()}\n")
+      - name: Cache Cargo artifacts
+        uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            ${{ matrix.workspace }}/target/
+          key: ${{ runner.os }}-gpui-${{ matrix.name }}-${{ steps.rust-toolchain.outputs.hash }}-${{ hashFiles(matrix.manifest) }}-${{ hashFiles(format('{0}/Cargo.lock', matrix.workspace)) }}
+          restore-keys: |
+            ${{ runner.os }}-gpui-${{ matrix.name }}-${{ steps.rust-toolchain.outputs.hash }}-
+            ${{ runner.os }}-gpui-${{ matrix.name }}-
+      - name: Check formatting
+        run: cargo fmt --manifest-path ${{ matrix.manifest }} -- --check
+      - name: Check Windows build
+        run: cargo check --manifest-path ${{ matrix.manifest }} --locked
+      - name: Run Clippy
+        run: cargo clippy --manifest-path ${{ matrix.manifest }} --locked --all-targets -- -D warnings
+      - name: Run tests
+        run: cargo test --manifest-path ${{ matrix.manifest }} --locked
+      # No `--release` pass here either, for the reason the macOS spike job
+      # gives: the smoke below runs the debug executable this job builds, so the
+      # release metadata cost about three minutes per job and nothing consumed
+      # it.
+      - name: Build Windows settings smoke executable
+        if: matrix.manifest == 'spikes/gpui-settings/Cargo.toml'
+        timeout-minutes: 5
+        run: cargo build --manifest-path ${{ matrix.manifest }} --locked
+      - name: Smoke Windows GPUI settings lifecycle
+        if: matrix.manifest == 'spikes/gpui-settings/Cargo.toml'
+        shell: pwsh
+        timeout-minutes: 2
+        run: |
+          $executable = Join-Path $PWD "spikes/gpui-settings/target/debug/bongocat-gpui-settings-spike.exe"
+          $stdout = Join-Path $env:RUNNER_TEMP "gpui-settings.stdout.log"
+          $stderr = Join-Path $env:RUNNER_TEMP "gpui-settings.stderr.log"
+          Remove-Item $stdout, $stderr -Force -ErrorAction SilentlyContinue
+          $process = Start-Process `
+            -FilePath $executable `
+            -ArgumentList @("--auto-quit-ms", "10000", "--tooltip-probe") `
+            -NoNewWindow `
+            -PassThru `
+            -RedirectStandardOutput $stdout `
+            -RedirectStandardError $stderr
+          # No UI Automation inspection here. GPUI 0.2.2 does not project a
+          # usable UIA tree of its own, and ADR-0054 retired the spike's
+          # project-owned AccessKit bridge, so a UIA-driven check could only
+          # assert a contract BongoCat no longer owns. This step is now a pure
+          # lifecycle smoke: the debug binary must open its window, render a
+          # first frame at a positive scale factor, run its typed runtime
+          # bridge and tooltip probe, and shut the runtime down before the
+          # application exits. `--runtime-error-probe` is not passed because
+          # driving a second refresh needed the retired action channel; runtime
+          # error/retry state coverage lives in the product's own
+          # settings-window state smoke instead.
+          if (-not $process.WaitForExit(30000)) {
+            Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
+            $process.WaitForExit()
+            throw "Windows GPUI settings smoke exceeded 30 seconds"
+          }
+          $output = @(
+            Get-Content $stdout -Raw -ErrorAction SilentlyContinue
+            Get-Content $stderr -Raw -ErrorAction SilentlyContinue
+          ) -join "`n"
+          Write-Host $output
+          if ($process.ExitCode -ne 0) {
+            throw "Windows GPUI settings smoke exited with $($process.ExitCode)"
+          }
+          @(
+            "gpui-settings-spike: window opened",
+            "gpui-settings-spike: first frame elapsed_ms=",
+            "scale_factor=",
+            "gpui-settings-spike: runtime snapshot revision=1",
+            "gpui-settings-spike: native tooltip hover entered",
+            "gpui-settings-spike: tooltip built after hover delay",
+            "gpui-settings-spike: tooltip hover delay and exit verified",
+            "gpui-settings-spike: runtime stopped",
+            "gpui-settings-spike: stopped"
+          ) | ForEach-Object {
+            if (-not $output.Contains($_)) {
+              throw "Windows GPUI settings smoke did not report: $_"
+            }
+          }
+          $runtimeStopped = $output.IndexOf("gpui-settings-spike: runtime stopped")
+          $stopped = $output.IndexOf("gpui-settings-spike: stopped")
+          if ($runtimeStopped -lt 0 -or $stopped -le $runtimeStopped) {
+            throw "Windows GPUI settings runtime did not stop before application shutdown"
+          }
+      - name: Build Windows overlay smoke executable
+        if: matrix.manifest == 'spikes/gpui-overlay-macos/Cargo.toml'
+        timeout-minutes: 5
+        run: cargo build --manifest-path ${{ matrix.manifest }} --locked
+      - name: Smoke independent Win32 and D3D11 overlay
+        if: matrix.manifest == 'spikes/gpui-overlay-macos/Cargo.toml'
+        shell: pwsh
+        timeout-minutes: 3
+        run: |
+          $executable = Join-Path $PWD "spikes/gpui-overlay-macos/target/debug/bongocat-gpui-overlay-macos-spike.exe"
+          function Invoke-OverlaySmoke {
+            param(
+              [string] $Name,
+              [string[]] $Arguments
+            )
+            $stdout = Join-Path $env:RUNNER_TEMP "$Name.stdout.log"
+            $stderr = Join-Path $env:RUNNER_TEMP "$Name.stderr.log"
+            Remove-Item $stdout, $stderr -Force -ErrorAction SilentlyContinue
+            $process = Start-Process `
+              -FilePath $executable `
+              -ArgumentList $Arguments `
+              -NoNewWindow `
+              -PassThru `
+              -RedirectStandardOutput $stdout `
+              -RedirectStandardError $stderr
+            if (-not $process.WaitForExit(30000)) {
+              Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
+              $process.WaitForExit()
+              $output = @(
+                Get-Content $stdout -Raw -ErrorAction SilentlyContinue
+                Get-Content $stderr -Raw -ErrorAction SilentlyContinue
+              ) -join "`n"
+              Write-Host $output
+              throw "$Name overlay smoke exceeded 30 seconds"
+            }
+            $output = @(
+              Get-Content $stdout -Raw -ErrorAction SilentlyContinue
+              Get-Content $stderr -Raw -ErrorAction SilentlyContinue
+            ) -join "`n"
+            Write-Host $output
+            if ($process.ExitCode -ne 0) {
+              throw "$Name overlay smoke exited with $($process.ExitCode)"
+            }
+            return $output
+          }
+
+          $normal = Invoke-OverlaySmoke `
+            -Name "normal" `
+            -Arguments @("--auto-quit-ms", "1800")
+          @(
+            "Windows native overlay created",
+            "Windows interaction mode=drag",
+            "Windows overlay drag contract verified delta=24x18",
+            "Windows interaction mode=click-through",
+            "Windows non-empty premultiplied-alpha draw/present submitted",
+            "frame source started target_hz=60",
+            "Windows logical resize width=400 height=300",
+            "Windows overlay hidden",
+            "GPUI settings window opened",
+            "auto quit requested",
+            "frame source stopped frames=",
+            "resize_completed=true",
+            "Windows overlay GPU released",
+            "Windows overlay window destroyed"
+          ) | ForEach-Object {
+            if (-not $normal.Contains($_)) {
+              throw "normal overlay smoke did not report: $_"
+            }
+          }
+          $gpuRelease = $normal.IndexOf("Windows overlay GPU released")
+          $windowDestroy = $normal.IndexOf("Windows overlay window destroyed")
+          $frameStop = $normal.IndexOf("frame source stopped frames=")
+          if ($frameStop -lt 0 -or $gpuRelease -le $frameStop -or $windowDestroy -le $gpuRelease) {
+            throw "overlay did not stop frame source before releasing GPU and destroying HWND"
+          }
+
+          $degraded = Invoke-OverlaySmoke `
+            -Name "degraded" `
+            -Arguments @("--simulate-overlay-init-failure", "--auto-quit-ms", "900")
+          @(
+            "overlay degraded error=simulated overlay initialization failure",
+            "GPUI settings window opened",
+            "auto quit requested"
+          ) | ForEach-Object {
+            if (-not $degraded.Contains($_)) {
+              throw "degraded overlay smoke did not report: $_"
+            }
+          }
+
+          $recovered = Invoke-OverlaySmoke `
+            -Name "renderer-recovery" `
+            -Arguments @("--simulate-renderer-loss-at-frame", "12", "--auto-quit-ms", "1800")
+          @(
+            "frame degraded kind=device_lost error=simulated renderer device loss",
+            "frame renderer recovered attempt=1",
+            "settings overlay status=GPUI settings + native overlay (recovered)",
+            "failures=1 recoveries=1"
+          ) | ForEach-Object {
+            if (-not $recovered.Contains($_)) {
+              throw "renderer-recovery overlay smoke did not report: $_"
+            }
+          }
+          $degradedAt = $recovered.IndexOf("frame degraded kind=device_lost")
+          $gpuReleasedAt = $recovered.IndexOf("Windows overlay GPU released", $degradedAt)
+          $windowDestroyedAt = $recovered.IndexOf("Windows overlay window destroyed", $gpuReleasedAt)
+          $recoveredAt = $recovered.IndexOf("frame renderer recovered attempt=1")
+          if (
+            $degradedAt -lt 0 -or
+            $gpuReleasedAt -le $degradedAt -or
+            $windowDestroyedAt -le $gpuReleasedAt -or
+            $recoveredAt -le $windowDestroyedAt
+          ) {
+            throw "Windows renderer was recreated before the failed GPU/window owner released"
+          }
+
+          $surfaceRecovered = Invoke-OverlaySmoke `
+            -Name "surface-recovery" `
+            -Arguments @("--simulate-surface-unavailable-at-frame", "12", "--auto-quit-ms", "1800")
+          @(
+            "frame degraded kind=surface_unavailable error=simulated renderer surface unavailable",
+            "frame renderer recovered attempt=1",
+            "settings overlay status=GPUI settings + native overlay (recovered)",
+            "failures=1 recoveries=1"
+          ) | ForEach-Object {
+            if (-not $surfaceRecovered.Contains($_)) {
+              throw "surface-recovery overlay smoke did not report: $_"
+            }
+          }
+          $surfaceDegradedAt = $surfaceRecovered.IndexOf("frame degraded kind=surface_unavailable")
+          $surfaceGpuReleasedAt = $surfaceRecovered.IndexOf("Windows overlay GPU released", $surfaceDegradedAt)
+          $surfaceWindowDestroyedAt = $surfaceRecovered.IndexOf("Windows overlay window destroyed", $surfaceGpuReleasedAt)
+          $surfaceRecoveredAt = $surfaceRecovered.IndexOf("frame renderer recovered attempt=1")
+          if (
+            $surfaceDegradedAt -lt 0 -or
+            $surfaceGpuReleasedAt -le $surfaceDegradedAt -or
+            $surfaceWindowDestroyedAt -le $surfaceGpuReleasedAt -or
+            $surfaceRecoveredAt -le $surfaceWindowDestroyedAt
+          ) {
+            throw "Windows surface recovery recreated the renderer before releasing GPU/HWND"
+          }
+
+          $cycles = Invoke-OverlaySmoke `
+            -Name "cycles" `
+            -Arguments @("--windows-overlay-cycles", "100")
+          @(
+            "Windows cycles=100",
+            "non_empty_frames=400",
+            "threads_before=",
+            "threads_after=",
+            "threads_baseline_high_water=",
+            "measurement_batches=",
+            "gpu_bytes_before=",
+            "gpu_bytes_after=",
+            "clean_shutdown=true"
+          ) | ForEach-Object {
+            if (-not $cycles.Contains($_)) {
+              throw "overlay cycle smoke did not report: $_"
+            }
+          }
+      - name: Collect redacted failure evidence
+        if: ${{ failure() }}
+        shell: bash
+        run: python3 tools/collect-failure-evidence.py --input "$RUNNER_TEMP" --output "$RUNNER_TEMP/bongocat-failure-evidence" --platform "${{ runner.os }}"
+      - name: Upload redacted failure evidence
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: failure-evidence-windows-gpui-${{ matrix.name }}
+          path: ${{ runner.temp }}/bongocat-failure-evidence
+          if-no-files-found: error
+          retention-days: 7

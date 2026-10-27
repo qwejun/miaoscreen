@@ -1,5 +1,5 @@
 [package]
-name = "catscreen"
+name = "miaoscreen"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -7,20 +7,20 @@ license.workspace = true
 publish.workspace = true
 
 [[bin]]
-name = "catscreen"
+name = "miaoscreen"
 path = "src/main.rs"
 
 [lib]
-name = "catscreen"
+name = "miaoscreen"
 path = "src/lib.rs"
 
 [dependencies]
-bongocat-input = { path = "../../kat/crates/bongocat-input" }
-bongocat-live2d-render = { path = "../../kat/crates/bongocat-live2d-render" }
-bongocat-model = { path = "../../kat/crates/bongocat-model" }
-bongocat-platform = { path = "../../kat/crates/bongocat-platform" }
-bongocat-render = { path = "../../kat/crates/bongocat-render" }
-bongocat-runtime = { path = "../../kat/crates/bongocat-runtime" }
+bongocat-input = { path = "../desktop/crates/bongocat-input" }
+bongocat-live2d-render = { path = "../desktop/crates/bongocat-live2d-render" }
+bongocat-model = { path = "../desktop/crates/bongocat-model" }
+bongocat-platform = { path = "../desktop/crates/bongocat-platform" }
+bongocat-render = { path = "../desktop/crates/bongocat-render" }
+bongocat-runtime = { path = "../desktop/crates/bongocat-runtime" }
 
 [lints]
 workspace = true

@@ -2,7 +2,7 @@
 //!
 //! This binary keeps everything above the drawing boundary — configuration,
 //! input, runtime, the evaluated [`bongocat_render::RenderSnapshot`] — and
-//! replaces only the drawing: snapshots leave through [`catscreen::MagneoSink`]
+//! replaces only the drawing: snapshots leave through [`miaoscreen::MagneoSink`]
 //! and the device rasterises them at the panel's own resolution. No window is
 //! created, so the desktop shows nothing, and no GPU is touched, so the picture
 //! does not depend on this machine's renderer.
@@ -31,7 +31,7 @@ use bongocat_model::{ModelId, ModelPackageLimits, PresetModelCatalog};
 use bongocat_platform::WindowsInputService;
 use bongocat_render::{ModelCommitFeedback, ModelCommitOutcome, RenderConsumer};
 use bongocat_runtime::{RuntimeClient, RuntimeCommand, RuntimeOwner};
-use catscreen::MagneoSink;
+use miaoscreen::{protocol, MagneoSink};
 
 const COMMAND_CAPACITY: usize = 64;
 const TIMEOUT: Duration = Duration::from_secs(5);
@@ -50,7 +50,7 @@ fn trace_keys() -> bool {
 
 fn main() {
     if let Err(error) = run() {
-        eprintln!("catscreen: {error}");
+        eprintln!("miaoscreen: {error}");
         std::process::exit(1);
     }
 }
@@ -63,7 +63,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     let committed = catalog.load(&model_id)?;
     let input_bindings = bindings::for_committed_model(&committed);
     eprintln!(
-        "catscreen: model {} at {}",
+        "miaoscreen: model {} at {}",
         model_id.as_str(),
         committed.root().display()
     );
@@ -94,10 +94,13 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         owner.cursor_producer(),
         owner.gamepad_axis_producer(),
     )?;
-    eprintln!("catscreen: input service ready");
+    eprintln!("miaoscreen: input service ready");
 
     let mut sink = MagneoSink::bind(&options.address)?;
-    eprintln!("catscreen: listening on {}", sink.destination());
+    eprintln!("miaoscreen: listening on {}", sink.destination());
+    if let Some(overlay) = &options.overlay {
+        sink.set_overlay(Some(Arc::new(overlay.clone())));
+    }
     let published = publish(&consumer, &mut sink);
     let _ = input.stop();
     let _ = owner.shutdown(TIMEOUT);
@@ -163,7 +166,7 @@ fn publish(
                     .map(|key| u32::try_from(key.asset_id.index()).unwrap_or(u32::MAX))
                     .collect();
                 eprintln!(
-                    "catscreen: {traced_frames} frames/s, {} keys {keys:?}",
+                    "miaoscreen: {traced_frames} frames/s, {} keys {keys:?}",
                     keys.len()
                 );
                 traced_frames = 0;
@@ -179,14 +182,76 @@ struct Options {
     address: String,
     model: String,
     models: PathBuf,
+    /// The strip under the picture. `None` disables it entirely and the device
+    /// keeps the layout this client has always had.
+    overlay: Option<protocol::Overlay>,
+}
+
+/// Where the three default lines sit inside a 160-pixel band.
+///
+/// The band lives in the 167 pixels of black the 1.72:1 canvas leaves below the
+/// picture, so these values only have to look right inside that strip; a taller
+/// band pushes the picture up on the device, not here.
+const CLOCK_Y: f32 = 46.0;
+const DATE_Y: f32 = 92.0;
+const BANNER_Y: f32 = 124.0;
+
+const DEFAULT_BAND: u32 = 160;
+const DEFAULT_BANNER: &str = "今天也要加油";
+const DEFAULT_CLOCK: &str = "{HH}:{mm}";
+const DEFAULT_DATE: &str = "{yyyy}-{MM}-{dd} {W}";
+
+/// The strip the panel shows by default: a large clock, the date under it and
+/// the user's banner at the bottom.
+///
+/// Colour values are `0xAARRGGBB` ints because that is exactly what an Android
+/// `Color` int is, so the device can feed them straight to a `Paint` with no
+/// channel reordering on either side of the wire.
+fn default_overlay() -> protocol::Overlay {
+    protocol::Overlay {
+        band_px: DEFAULT_BAND,
+        background: 0xFF00_0000,
+        divider: false,
+        lines: vec![
+            protocol::OverlayLine {
+                text: DEFAULT_CLOCK.to_owned(),
+                size_px: 44,
+                color: 0xFFFF_FFFF,
+                align: protocol::Align::Center,
+                weight: protocol::Weight::Bold,
+                font: protocol::Font::Mono,
+                center_y: CLOCK_Y,
+            },
+            protocol::OverlayLine {
+                text: DEFAULT_DATE.to_owned(),
+                size_px: 18,
+                color: 0xFF9A_A0A6,
+                align: protocol::Align::Center,
+                weight: protocol::Weight::Regular,
+                font: protocol::Font::System,
+                center_y: DATE_Y,
+            },
+            protocol::OverlayLine {
+                text: DEFAULT_BANNER.to_owned(),
+                size_px: 22,
+                color: 0xFFE8_EAED,
+                align: protocol::Align::Center,
+                weight: protocol::Weight::Regular,
+                font: protocol::Font::Rounded,
+                center_y: BANNER_Y,
+            },
+        ],
+    }
 }
 
 impl Options {
     fn parse() -> Result<Self, Box<dyn std::error::Error>> {
+        let mut overlay = default_overlay();
         let mut options = Self {
             address: DEFAULT_ADDRESS.to_owned(),
             model: DEFAULT_MODEL.to_owned(),
             models: default_models_root(),
+            overlay: None,
         };
 
         let mut arguments = std::env::args().skip(1);
@@ -197,13 +262,40 @@ impl Options {
                 "--models" => {
                     options.models = PathBuf::from(next_value(&mut arguments, "--models")?)
                 }
+                "--band" => {
+                    overlay.band_px = next_value(&mut arguments, "--band")?.parse()?;
+                }
+                "--banner" => {
+                    if let Some(line) = overlay.lines.get_mut(2) {
+                        line.text = next_value(&mut arguments, "--banner")?;
+                    }
+                }
+                "--clock" => {
+                    if let Some(line) = overlay.lines.get_mut(0) {
+                        line.text = next_value(&mut arguments, "--clock")?;
+                    }
+                }
+                "--date" => {
+                    if let Some(line) = overlay.lines.get_mut(1) {
+                        line.text = next_value(&mut arguments, "--date")?;
+                    }
+                }
+                "--no-band" => {
+                    overlay.band_px = 0;
+                }
                 "--help" | "-h" => {
                     eprintln!(
-                        "usage: catscreen [--address ADDR] [--model ID] [--models DIR]\n\
+                        "usage: miaoscreen [--address ADDR] [--model ID] [--models DIR]\n\
+                         \x20                [--band PX] [--banner TEXT] [--clock FMT] [--date FMT] [--no-band]\n\
                          \n\
                          Runs the model headlessly and streams RenderSnapshot frames to a\n\
                          client on ADDR (default {DEFAULT_ADDRESS}). The device reaches it\n\
-                         through `adb reverse tcp:7391 tcp:7391`."
+                         through `adb reverse tcp:7391 tcp:7391`.\n\
+                         \n\
+                         The bottom strip defaults to a clock, the date and the banner\n\
+                         \"{DEFAULT_BANNER}\" inside {DEFAULT_BAND} pixels. Time and date templates\n\
+                         support {{yyyy}} {{MM}} {{dd}} {{HH}} {{mm}} {{ss}} {{W}} (weekday) and\n\
+                         {{M}} (month). `--band 0` or `--no-band` turns the strip off."
                     );
                     std::process::exit(0);
                 }
@@ -218,6 +310,10 @@ impl Options {
             )
             .into());
         }
+        // The strip is always described, even when `band_px == 0`: an explicit
+        // off is the only way to clear a band a previous run turned on, and a
+        // zero-height band reproduces the full-height layout on the device.
+        options.overlay = Some(overlay);
         Ok(options)
     }
 }
@@ -246,5 +342,5 @@ fn default_models_root() -> PathBuf {
             return bundled;
         }
     }
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("../../kat/resources/models")
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("../desktop/resources/models")
 }

@@ -27,6 +27,22 @@ pub const KIND_FRAME: u8 = 0x12;
 /// invisible window can: a peer that simply stops receiving keeps its last
 /// picture, so hiding the model has to be said out loud.
 pub const KIND_CLEAR: u8 = 0x13;
+/// The bottom band: labels, a date and a clock under the picture.
+///
+/// Text travels as a template rather than as pixels. The device owns a clock, so
+/// a running minute costs no bandwidth and keeps running while the link is down;
+/// re-sending a rendered strip once a second would put a megabyte a minute on a
+/// USB link for no gain. Pixels would also have to be rasterised on this side,
+/// which is the one thing this protocol exists to avoid.
+pub const KIND_OVERLAY: u8 = 0x14;
+/// Ask the panel to send back small snapshots of what it is showing.
+///
+/// The settings window wants a live picture, and the panel is the only place the
+/// picture exists: this side never rasterises, so there is nothing here to show.
+/// The snapshots run the other way, from device to host, on the same socket.
+pub const KIND_PREVIEW_CTRL: u8 = 0x15;
+/// One snapshot from device to host: a JPEG of the panel's own framebuffer.
+pub const KIND_PREVIEW_FRAME: u8 = 0x16;
 
 const BLEND_NORMAL: u8 = 0;
 const BLEND_ADDITIVE: u8 = 1;
@@ -125,6 +141,194 @@ pub fn clear() -> Vec<u8> {
     writer.message(KIND_CLEAR)
 }
 
+/// Turn the panel's snapshot stream on or off.
+///
+/// The stream costs the panel a `glReadPixels` and a JPEG encode per snapshot,
+/// so it stays off unless a window is actually displaying the result.
+pub fn preview_control(enabled: bool) -> Vec<u8> {
+    let mut writer = Writer::new();
+    writer.u32(PROTOCOL_VERSION);
+    writer.u8(u8::from(enabled));
+    writer.message(KIND_PREVIEW_CTRL)
+}
+
+/// The JPEG carried by a `PREVIEW_FRAME` payload, or `None` if it is malformed.
+pub fn parse_preview_frame(payload: &[u8]) -> Option<&[u8]> {
+    if payload.len() < 8 {
+        return None;
+    }
+    let version = u32::from_le_bytes(payload[..4].try_into().ok()?);
+    if version != PROTOCOL_VERSION {
+        return None;
+    }
+    let declared = u32::from_le_bytes(payload[4..8].try_into().ok()?) as usize;
+    let body = &payload[8..];
+    (body.len() == declared).then_some(body)
+}
+
+/// Where a band line sits horizontally.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Align {
+    Left,
+    Center,
+    Right,
+}
+
+/// How heavy a band line is drawn.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Weight {
+    Regular,
+    Bold,
+}
+
+/// One of the panel's built-in typefaces.
+///
+/// The device is an Android reader with no font of its own beyond the system's,
+/// so the choice is a code rather than a font file: `System` is whatever the
+/// panel's sans-serif maps to, `Rounded` is the decorative Chinese face the
+/// firmware ships, and `Mono` keeps digits from shifting as the clock ticks.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Font {
+    System,
+    Rounded,
+    Mono,
+}
+
+const fn align_code(align: Align) -> u8 {
+    match align {
+        Align::Left => 0,
+        Align::Center => 1,
+        Align::Right => 2,
+    }
+}
+
+const fn weight_code(weight: Weight) -> u8 {
+    match weight {
+        Weight::Regular => 0,
+        Weight::Bold => 1,
+    }
+}
+
+const fn font_code(font: Font) -> u8 {
+    match font {
+        Font::System => 0,
+        Font::Rounded => 1,
+        Font::Mono => 2,
+    }
+}
+
+/// One line of the strip under the picture.
+///
+/// `text` is a template, not a finished string: the device substitutes the clock
+/// placeholders (`{HH}`, `{mm}`, `{yyyy}`, …) from its own wall clock every time
+/// it repaints, which is why a minute of ticking never crosses the wire.
+#[derive(Clone, Debug, PartialEq)]
+pub struct OverlayLine {
+    pub text: String,
+    pub size_px: u16,
+    /// `0xAARRGGBB`, the same layout an Android `Color` int uses.
+    pub color: u32,
+    pub align: Align,
+    pub weight: Weight,
+    pub font: Font,
+    /// Centre of the line, in pixels below the top of the band.
+    pub center_y: f32,
+}
+
+/// The strip drawn against the bottom edge of the panel.
+///
+/// `band_px == 0` is the off switch, and it has to stay a real off switch: the
+/// picture is laid out inside whatever the band leaves, so a disabled band must
+/// reproduce the full-height layout exactly rather than reserve a blank strip.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Overlay {
+    pub band_px: u32,
+    pub background: u32,
+    pub divider: bool,
+    pub lines: Vec<OverlayLine>,
+}
+
+impl Overlay {
+    /// Whether the device has anything to draw. An empty strip is the same as a
+    /// disabled one, so a publisher that sets no text does not blank a band.
+    pub fn is_visible(&self) -> bool {
+        self.band_px > 0 && !self.lines.is_empty()
+    }
+
+    /// The strip a publisher shows when nobody configured one: a large clock,
+    /// the date under it and the user's banner at the bottom.
+    ///
+    /// The band lives in the black the 1.72:1 canvas leaves below the picture,
+    /// so the line positions only have to look right inside 160 pixels. Colour
+    /// values are `0xAARRGGBB` ints because that is exactly what an Android
+    /// `Color` int is, so the device can feed them straight to a `Paint`.
+    pub fn default_strip() -> Overlay {
+        Overlay {
+            band_px: 160,
+            background: 0xFF00_0000,
+            divider: false,
+            lines: vec![
+                OverlayLine {
+                    text: "{HH}:{mm}".to_owned(),
+                    size_px: 44,
+                    color: 0xFFFF_FFFF,
+                    align: Align::Center,
+                    weight: Weight::Bold,
+                    font: Font::Mono,
+                    center_y: 46.0,
+                },
+                OverlayLine {
+                    text: "{yyyy}-{MM}-{dd} {W}".to_owned(),
+                    size_px: 18,
+                    color: 0xFF9A_A0A6,
+                    align: Align::Center,
+                    weight: Weight::Regular,
+                    font: Font::System,
+                    center_y: 92.0,
+                },
+                OverlayLine {
+                    text: "今天也要加油".to_owned(),
+                    size_px: 22,
+                    color: 0xFFE8_EAED,
+                    align: Align::Center,
+                    weight: Weight::Regular,
+                    font: Font::Rounded,
+                    center_y: 124.0,
+                },
+            ],
+        }
+    }
+}
+
+/// The band configuration. Sent on connect and whenever it changes; the device
+/// keeps no clock of its own beyond re-rendering what these templates say.
+pub fn overlay(config: &Overlay) -> Vec<u8> {
+    let mut writer = Writer::new();
+    writer.u32(PROTOCOL_VERSION);
+    writer.u32(config.band_px);
+    writer.u32(config.background);
+    writer.u8(u8::from(config.divider));
+    writer.u8(0);
+    writer.u16(0);
+    writer.u32(u32::try_from(config.lines.len()).unwrap_or(u32::MAX));
+
+    for line in &config.lines {
+        writer.u8(align_code(line.align));
+        writer.u8(weight_code(line.weight));
+        writer.u8(font_code(line.font));
+        writer.u8(0);
+        writer.u16(line.size_px);
+        writer.u16(0);
+        writer.u32(line.color);
+        writer.f32(line.center_y);
+        let bytes = line.text.as_bytes();
+        writer.u32(u32::try_from(bytes.len()).unwrap_or(u32::MAX));
+        writer.raw(bytes);
+    }
+
+    writer.message(KIND_OVERLAY)
+}
+
 /// Everything a frame can reference: texture and key-image pixels, plus their
 /// declared sizes.
 ///
@@ -145,7 +349,14 @@ pub fn resources(
     writer.u32(PROTOCOL_VERSION);
     writer.u64(generation);
 
+    // The canvas is what the picture is framed against, so it travels whether or
+    // not the model has a background image. Framing the model's own bounds
+    // instead crops the desk and the key images out of the picture.
     let canvas_bounds = ModelBounds::from_canvas(canvas);
+    writer.f32(canvas_bounds.min_x);
+    writer.f32(canvas_bounds.max_x);
+    writer.f32(canvas_bounds.min_y);
+    writer.f32(canvas_bounds.max_y);
 
     match &resources.background {
         Some(asset) => {
@@ -153,10 +364,6 @@ pub fn resources(
             writer.u8(1);
             writer.u32(asset.width);
             writer.u32(asset.height);
-            writer.f32(canvas_bounds.min_x);
-            writer.f32(canvas_bounds.max_x);
-            writer.f32(canvas_bounds.min_y);
-            writer.f32(canvas_bounds.max_y);
             writer.u32(u32::try_from(bytes.len()).unwrap_or(u32::MAX));
             writer.raw(&bytes);
         }
@@ -173,7 +380,6 @@ pub fn resources(
         writer.raw(&bytes);
     }
 
-    let canvas_bounds = ModelBounds::from_canvas(canvas);
     writer.u32(u32::try_from(resources.key_assets.len()).unwrap_or(u32::MAX));
     for asset in &resources.key_assets {
         let bytes = read_asset(&asset.path)?;

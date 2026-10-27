@@ -1,0 +1,31 @@
+[package]
+name = "bongocat-ui"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+async-channel.workspace = true
+bongocat-config.workspace = true
+bongocat-i18n.workspace = true
+bongocat-ui-protocol.workspace = true
+bongocat-platform.workspace = true
+bongocat-plugin-sdk.workspace = true
+bongocat-plugin-service.workspace = true
+dirs.workspace = true
+gpui-kit = { workspace = true, features = ["assets"] }
+image.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+
+[dev-dependencies]
+bongocat-plugin-manager.workspace = true
+gpui-kit = { workspace = true, features = ["test-support"] }
+tempfile.workspace = true
+zip.workspace = true
+
+[lints]
+workspace = true

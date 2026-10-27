@@ -437,18 +437,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "fc652a48c352aef3ea3aed32080501cf3ef6ed5da78602a020c991775b0aff04"
 
 [[package]]
-name = "catscreen"
-version = "0.1.0"
-dependencies = [
- "bongocat-input",
- "bongocat-live2d-render",
- "bongocat-model",
- "bongocat-platform",
- "bongocat-render",
- "bongocat-runtime",
-]
-
-[[package]]
 name = "cfg-if"
 version = "1.0.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1235,6 +1223,18 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "488016bfae457b036d996092f6cb448677611ce4449e970ceaf42695203f218a"
 dependencies = [
  "autocfg",
+]
+
+[[package]]
+name = "miaoscreen"
+version = "0.1.0"
+dependencies = [
+ "bongocat-input",
+ "bongocat-live2d-render",
+ "bongocat-model",
+ "bongocat-platform",
+ "bongocat-render",
+ "bongocat-runtime",
 ]
 
 [[package]]

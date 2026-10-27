@@ -37,13 +37,18 @@ for ($i = 0; $i -lt $Messages; $i++) {
         0x11 {
             $version = [BitConverter]::ToUInt32($payload, 0)
             $generation = [BitConverter]::ToUInt64($payload, 4)
-            $offset = 12
+            $canvasMinX = [BitConverter]::ToSingle($payload, 12)
+            $canvasMaxX = [BitConverter]::ToSingle($payload, 16)
+            $canvasMinY = [BitConverter]::ToSingle($payload, 20)
+            $canvasMaxY = [BitConverter]::ToSingle($payload, 24)
+            $offset = 28
             $hasBackground = $payload[$offset]
             $offset += 1
             $backgroundBytes = 0
             if ($hasBackground -ne 0) {
-                $backgroundBytes = [BitConverter]::ToUInt32($payload, ($offset + 20))
-                $offset += 24 + [int]$backgroundBytes
+                # width, height, byte count, pixels
+                $backgroundBytes = [BitConverter]::ToUInt32($payload, ($offset + 8))
+                $offset += 12 + [int]$backgroundBytes
             }
             $textures = [BitConverter]::ToUInt32($payload, $offset)
             $offset += 4
@@ -63,7 +68,7 @@ for ($i = 0; $i -lt $Messages; $i++) {
                 $size = [BitConverter]::ToUInt32($payload, ($offset + 29))
                 $offset += 33 + [int]$size
             }
-            Write-Host ("RESOURCES  gen={0} background={1:N0} textures={2} png={3:N0} bytes keyAssets={4} total={5:N0} bytes" -f $generation, $backgroundBytes, $textures, $bytes, $keys, $length)
+            Write-Host ("RESOURCES  gen={0} canvas=[{1:N2},{2:N2}]x[{3:N2},{4:N2}] background={5:N0} textures={6} png={7:N0} bytes keyAssets={8} total={9:N0} bytes" -f $generation, $canvasMinX, $canvasMaxX, $canvasMinY, $canvasMaxY, $backgroundBytes, $textures, $bytes, $keys, $length)
         }
         0x12 {
             $generation = [BitConverter]::ToUInt64($payload, 4)

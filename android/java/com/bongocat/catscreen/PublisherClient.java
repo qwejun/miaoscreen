@@ -31,20 +31,57 @@ final class PublisherClient implements Runnable {
     }
 
     private static final String TAG = "CatScreen";
-    private static final int PORT = 7391;
+    /** The publisher the reverse tunnel points at. */
+    private static final String DEFAULT_ADDRESS = "127.0.0.1:7391";
+    private static final int DEFAULT_PORT = 7391;
     private static final int CONNECT_TIMEOUT_MS = 2000;
     private static final int RETRY_DELAY_MS = 750;
+
+    /**
+     * The publisher sends frames continuously, so a socket that stays silent is a
+     * socket whose tunnel is gone. Without this the reader blocks in
+     * {@code read()} forever after the adb server is restarted: the device's end
+     * of the reverse tunnel is never closed, so no end-of-stream arrives and the
+     * cat freezes while the thread sits there.
+     */
+    private static final int READ_TIMEOUT_MS = 4000;
 
     private final Object lock = new Object();
     private final Frame shared = new Frame();
 
+    /** Where the publisher lives. The loopback default is the reverse tunnel;
+     * a LAN address covers the case where adb's tunnel is unavailable. */
+    private final String address;
+
+    PublisherClient() {
+        this(DEFAULT_ADDRESS);
+    }
+
+    PublisherClient(String address) {
+        this.address = address != null ? address : DEFAULT_ADDRESS;
+    }
+
     private Scene pendingScene;
+    private Overlay pendingOverlay;
     private boolean hasFrame;
     private boolean cleared;
 
     private volatile boolean running = true;
     private volatile Listener listener;
     private volatile Socket socket;
+
+    /**
+     * Whether the host is displaying snapshots. The render thread reads this every
+     * frame, so it is a plain volatile flag rather than a queue: the newest value
+     * is the only one that matters.
+     */
+    private volatile boolean previewRequested;
+    /**
+     * Guards the output side against two snapshots overlapping. The capture runs
+     * on the render thread, which must never interleave half a JPEG into the
+     * stream the reader is parsing on the other thread.
+     */
+    private final Object sendLock = new Object();
 
     void setListener(Listener listener) {
         this.listener = listener;
@@ -56,6 +93,15 @@ final class PublisherClient implements Runnable {
             Scene scene = pendingScene;
             pendingScene = null;
             return scene;
+        }
+    }
+
+    /** The newest strip description, or null when none arrived since the last call. */
+    Overlay takeOverlay() {
+        synchronized (lock) {
+            Overlay overlay = pendingOverlay;
+            pendingOverlay = null;
+            return overlay;
         }
     }
 
@@ -80,6 +126,54 @@ final class PublisherClient implements Runnable {
         }
     }
 
+    /** Whether the host wants snapshots of the panel right now. */
+    boolean isPreviewRequested() {
+        return previewRequested;
+    }
+
+    /**
+     * Sends one snapshot to the host.
+     *
+     * <p>Called from the render thread at a low rate, so a blocking write is
+     * acceptable: the socket's own send timeout bounds it, and the frame stream in
+     * the other direction is unaffected. A failed write is dropped silently; the
+     * next snapshot will try again, and the reader will notice a dead link first.
+     */
+    void sendPreview(byte[] jpeg) {
+        Socket current = socket;
+        if (current == null || jpeg == null || jpeg.length == 0) {
+            return;
+        }
+        synchronized (sendLock) {
+            try {
+                java.io.OutputStream out = current.getOutputStream();
+                byte[] header = new byte[5];
+                header[0] = (byte) Protocol.KIND_PREVIEW_FRAME;
+                int length = 8 + jpeg.length;
+                header[1] = (byte) (length & 0xFF);
+                header[2] = (byte) ((length >>> 8) & 0xFF);
+                header[3] = (byte) ((length >>> 16) & 0xFF);
+                header[4] = (byte) ((length >>> 24) & 0xFF);
+                out.write(header);
+                byte[] head = new byte[8];
+                writeLe32(head, 0, Protocol.VERSION);
+                writeLe32(head, 4, jpeg.length);
+                out.write(head);
+                out.write(jpeg);
+                out.flush();
+            } catch (IOException error) {
+                Log.w(TAG, "snapshot dropped: " + error.getMessage());
+            }
+        }
+    }
+
+    private static void writeLe32(byte[] target, int offset, int value) {
+        target[offset] = (byte) (value & 0xFF);
+        target[offset + 1] = (byte) ((value >>> 8) & 0xFF);
+        target[offset + 2] = (byte) ((value >>> 16) & 0xFF);
+        target[offset + 3] = (byte) ((value >>> 24) & 0xFF);
+    }
+
     void stop() {
         running = false;
         closeQuietly(socket);
@@ -91,16 +185,25 @@ final class PublisherClient implements Runnable {
         while (running) {
             Socket connection = new Socket();
             try {
-                connection.connect(new InetSocketAddress("127.0.0.1", PORT), CONNECT_TIMEOUT_MS);
+                connection.connect(parseAddress(address), CONNECT_TIMEOUT_MS);
                 connection.setTcpNoDelay(true);
+                connection.setSoTimeout(READ_TIMEOUT_MS);
                 socket = connection;
                 publish("connected", false);
                 read(connection);
                 publish("publisher closed the connection", false);
             } catch (IOException error) {
                 if (running) {
-                    publish("waiting for the publisher", false);
+                    publish("waiting for the publisher: " + error.getMessage(), false);
                     Log.w(TAG, "connection lost: " + error.getMessage());
+                }
+            } catch (Throwable error) {
+                // A parser bug must not take this thread with it. The panel is the
+                // program's only output, so a reader that dies silently is
+                // indistinguishable from a cat that stopped moving.
+                if (running) {
+                    publish("reader failed: " + error, false);
+                    Log.e(TAG, "reader failed", error);
                 }
             } finally {
                 closeQuietly(connection);
@@ -154,6 +257,18 @@ final class PublisherClient implements Runnable {
                         cleared = true;
                     }
                     break;
+                case Protocol.KIND_OVERLAY:
+                    Overlay overlay = Overlay.read(reader);
+                    synchronized (lock) {
+                        pendingOverlay = overlay;
+                    }
+                    break;
+                case Protocol.KIND_PREVIEW_CTRL:
+                    if (reader.u32() != Protocol.VERSION) {
+                        throw new IOException("preview control carries an unknown version");
+                    }
+                    previewRequested = reader.u8() != 0;
+                    break;
                 default:
                     break;
             }
@@ -173,14 +288,14 @@ final class PublisherClient implements Runnable {
         reader.u32();
         Scene scene = new Scene();
         scene.generation = reader.u64();
+        scene.canvasMinX = reader.f32();
+        scene.canvasMaxX = reader.f32();
+        scene.canvasMinY = reader.f32();
+        scene.canvasMaxY = reader.f32();
 
         if (reader.u8() != 0) {
             int width = reader.u32();
             int height = reader.u32();
-            scene.backgroundMinX = reader.f32();
-            scene.backgroundMaxX = reader.f32();
-            scene.backgroundMinY = reader.f32();
-            scene.backgroundMaxY = reader.f32();
             int size = reader.u32();
             scene.background = decode(reader, size, width, height, "background");
         }
@@ -236,6 +351,21 @@ final class PublisherClient implements Runnable {
                     + ", expected " + width + "x" + height);
         }
         return bitmap;
+    }
+
+    /** Splits {@code host:port} (or bare {@code host}) into an endpoint. */
+    private static InetSocketAddress parseAddress(String address) {
+        int colon = address.lastIndexOf(':');
+        if (colon <= 0) {
+            return new InetSocketAddress(address, DEFAULT_PORT);
+        }
+        int port;
+        try {
+            port = Integer.parseInt(address.substring(colon + 1));
+        } catch (NumberFormatException ignored) {
+            return new InetSocketAddress(address, DEFAULT_PORT);
+        }
+        return new InetSocketAddress(address.substring(0, colon), port);
     }
 
     private void publish(String text, boolean live) {
