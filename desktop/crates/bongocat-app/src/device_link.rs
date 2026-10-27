@@ -11,7 +11,7 @@
 use std::net::{IpAddr, Ipv4Addr, SocketAddr, UdpSocket};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use bongocat_audio::MotionAudioSink;
 use bongocat_magneo::protocol::Overlay;
@@ -23,6 +23,23 @@ use gpui_kit::App;
 use serde::{Deserialize, Serialize};
 
 use crate::usb_link;
+
+/// How often the cable path checks that its reverse tunnel is still open.
+///
+/// The check is one `adb devices` plus one `adb reverse`, and it only runs while
+/// the panel is not connected — a connected panel needs nothing from here.
+const CABLE_CHECK_INTERVAL: Duration = Duration::from_secs(4);
+
+/// The shortest gap between two attempts to start the panel's app.
+const CABLE_LAUNCH_INTERVAL: Duration = Duration::from_secs(30);
+
+/// How long the panel is given to dial a tunnel that has just been opened.
+///
+/// The panel retries its own address every three quarters of a second, so a
+/// tunnel that is genuinely usable reconnects on its own well inside this. The
+/// wait is what keeps the fallback below from launching over the top of a panel
+/// that was already about to reconnect.
+const CABLE_PANEL_GRACE: Duration = Duration::from_secs(8);
 
 /// The publisher as the model's audio destination.
 ///
@@ -179,7 +196,78 @@ impl ProductDeviceLink {
         // is pointed somewhere else is moved, and one that is not running at all
         // is started.
         link.apply_mode();
+        link.watch_cable();
         link
+    }
+
+    /// Keeps the cable path working after the moment it was set up.
+    ///
+    /// The reverse tunnel is state held by the `adb` server, not by this
+    /// program. That server is a separate process which exits when the cable is
+    /// replugged, when the panel reboots, and when anything else on the machine
+    /// restarts it — and every one of those takes the mapping with it. The
+    /// panel then dials a loopback port that nothing answers on, and it will
+    /// keep dialling it forever, because from its side the address is correct.
+    ///
+    /// Reopening the tunnel is one subprocess call, so the check is cheap enough
+    /// to belong on a timer rather than on a person noticing.
+    fn watch_cable(self: &Arc<Self>) {
+        if self.adb.is_none() {
+            return;
+        }
+        let link = Arc::downgrade(self);
+        let _ = std::thread::Builder::new()
+            .name("magneo-cable".to_owned())
+            .spawn(move || {
+                // When the current tunnel was opened, and when the fallback last
+                // ran. Both are `None` while the panel is connected, so a link
+                // that drops starts the sequence from the beginning.
+                let mut tunnel_since: Option<Instant> = None;
+                let mut launched_at: Option<Instant> = None;
+                loop {
+                    std::thread::sleep(CABLE_CHECK_INTERVAL);
+                    let Some(link) = link.upgrade() else {
+                        return;
+                    };
+                    if link.mode() != DeviceLinkMode::Wired {
+                        continue;
+                    }
+                    if link.handle.is_connected() {
+                        tunnel_since = None;
+                        launched_at = None;
+                        continue;
+                    }
+                    let Some(adb) = link.adb.as_deref() else {
+                        return;
+                    };
+                    let failure = usb_link::prepare(adb, link.port).err();
+                    let opened = failure.is_none();
+                    *link
+                        .problem
+                        .lock()
+                        .unwrap_or_else(std::sync::PoisonError::into_inner) = failure;
+                    if !opened {
+                        // Nothing to wait for: no cable, or a server that will
+                        // not take the mapping. The next tick tries again.
+                        tunnel_since = None;
+                        continue;
+                    }
+                    // A tunnel that opens onto nothing means the app on the panel
+                    // is not running: the activity is what dials. The panel gets
+                    // its grace period first, and a relaunch is only repeated on a
+                    // slow clock — relaunching something that is already trying is
+                    // not progress.
+                    let since = *tunnel_since.get_or_insert_with(Instant::now);
+                    if since.elapsed() < CABLE_PANEL_GRACE {
+                        continue;
+                    }
+                    if launched_at.is_some_and(|at| at.elapsed() < CABLE_LAUNCH_INTERVAL) {
+                        continue;
+                    }
+                    launched_at = Some(Instant::now());
+                    let _ = usb_link::launch(adb, &format!("127.0.0.1:{}", link.port));
+                }
+            });
     }
 
     fn mode(&self) -> DeviceLinkMode {

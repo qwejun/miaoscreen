@@ -149,6 +149,14 @@ final class PublisherClient implements Runnable, UdpFrameChannel.Sink {
     private long lastGeneration = -1;
     private long lastSequence = -1;
 
+    /**
+     * What the panel was last told, so the sixty frames a second that all say
+     * "live" do not each become a log line and a message to the UI thread.
+     */
+    private final Object publishLock = new Object();
+    private String lastPublished;
+    private boolean lastPublishedLive;
+
     private volatile long lastMarkAt;
     private volatile long lastMarkSequence = -1;
     private volatile long lastDatagramFrameAt;
@@ -355,6 +363,25 @@ final class PublisherClient implements Runnable, UdpFrameChannel.Sink {
         Protocol.Reader reader = new Protocol.Reader(raw);
         boolean live = false;
         long lastStats = System.currentTimeMillis();
+
+        // A new connection is a new host session, and the sequence watermark
+        // belongs to that session rather than to this panel. The host numbers
+        // its frames from one per process, so a host that restarts and reloads
+        // the same model arrives with the same generation and numbers the panel
+        // has already seen — every frame is then a "duplicate", nothing is
+        // drawn, and the panel sits on "loading the model" while the link is
+        // perfectly healthy. Starting each connection from nothing makes the
+        // first frame of a session the newest frame of a session.
+        synchronized (lock) {
+            lastGeneration = -1;
+            lastSequence = -1;
+        }
+        // The same reasoning applies to what the panel is told: after a drop the
+        // first report of the new session has to reach the screen even when it
+        // repeats the words from the end of the last one.
+        synchronized (publishLock) {
+            lastPublished = null;
+        }
 
         while (running && reader.next()) {
             switch (reader.kind) {
@@ -682,9 +709,20 @@ final class PublisherClient implements Runnable, UdpFrameChannel.Sink {
 
     private void publish(String text, boolean live) {
         Listener sink = listener;
-        if (sink != null) {
-            sink.onStatus(text, live);
+        if (sink == null) {
+            return;
         }
+        // Every accepted frame reports itself live, which is once per frame at
+        // sixty hertz. Repeating the state that is already on the panel changes
+        // nothing on it, so only a change is worth carrying across.
+        synchronized (publishLock) {
+            if (text.equals(lastPublished) && live == lastPublishedLive) {
+                return;
+            }
+            lastPublished = text;
+            lastPublishedLive = live;
+        }
+        sink.onStatus(text, live);
     }
 
     private static void closeQuietly(Socket target) {

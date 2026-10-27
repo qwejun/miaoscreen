@@ -19,3 +19,6 @@ desktop/vendor/cubism/
 
 # 本地汇总的发布产物（走 GitHub Releases，不进历史）
 /dist/
+
+# 本机旧版本与发布产物备份，不进仓库
+/backup/
