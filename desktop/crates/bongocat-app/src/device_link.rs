@@ -17,8 +17,8 @@ use bongocat_audio::MotionAudioSink;
 use bongocat_magneo::protocol::{Font, Overlay, Rows};
 use bongocat_magneo::MagneoHandle;
 use bongocat_ui::{
-    BannerFont, BannerRows, DeviceLink, DeviceLinkMode, DeviceLinkProblem, DeviceLinkState,
-    DeviceOverlayConfig,
+    BannerFont, BannerPools, BannerRows, BannerStyle, DeviceLink, DeviceLinkMode,
+    DeviceLinkProblem, DeviceLinkState, DeviceOverlayConfig,
     LiveLink,
 };
 use gpui_kit::App;
@@ -66,6 +66,14 @@ const LEGACY_DATE_TEMPLATE: &str = "{yyyy}-{MM}-{dd} {W}";
 /// sits at. Both ends are the panel's limits rather than a preference, so the
 /// page offers the range and the reader never has to guess.
 const BANNER_SIZE_RANGE: (u16, u16) = (16, 44);
+
+/// The size and place the "low" style pins the banner to, in panel pixels.
+///
+/// Chosen from the mock-up round: small enough to read as part of the scene,
+/// low enough to sit under the cat's paws, still inside the chord so the text
+/// never meets the bezel.
+const LOW_BANNER_SIZE: u16 = 22;
+const LOW_BANNER_CENTER_Y: f32 = 748.0;
 
 /// The publisher as the model's audio destination.
 ///
@@ -120,6 +128,13 @@ struct StoredConfig {
     banner_font: Option<String>,
     /// How willing the panel should be to break the banner into rows.
     banner_rows: Option<String>,
+    /// How the banner is dressed. Absent means plain text, which is what every
+    /// build before this one drew.
+    banner_style: Option<String>,
+    /// Which sentence pools are in rotation. Absent means all of them.
+    banner_pools: Option<BannerPools>,
+    /// The person's own sentences, one per `；`. Absent means none.
+    banner_custom: Option<String>,
     /// `wireless` or `wired`. Absent means the network, which needs no cable.
     link: Option<String>,
     /// Layout revision of the strip. Absent means the file was written before
@@ -180,6 +195,13 @@ impl StoredConfig {
                 .as_deref()
                 .and_then(BannerRows::from_id)
                 .unwrap_or(defaults.banner_rows),
+            banner_style: self
+                .banner_style
+                .as_deref()
+                .and_then(BannerStyle::from_id)
+                .unwrap_or(defaults.banner_style),
+            banner_pools: self.banner_pools.unwrap_or(defaults.banner_pools),
+            banner_custom: self.banner_custom.unwrap_or(defaults.banner_custom),
         }
     }
 
@@ -194,6 +216,9 @@ impl StoredConfig {
             banner_size: Some(config.banner_size),
             banner_font: Some(config.banner_font.id().to_owned()),
             banner_rows: Some(config.banner_rows.id().to_owned()),
+            banner_style: Some(config.banner_style.id().to_owned()),
+            banner_pools: Some(config.banner_pools),
+            banner_custom: Some(config.banner_custom.clone()),
             link: None,
             strip_layout: Some(STRIP_LAYOUT),
             adb: None,
@@ -599,6 +624,42 @@ impl DeviceLink for ProductDeviceLink {
 /// the hour change on its own.
 const RANDOM_BANNER_PLACEHOLDER: &str = "{random}";
 
+/// Builds the placeholder that stands for "the panel picks a sentence".
+///
+/// The plain marker stays the form this build writes when the person has
+/// touched nothing, because it is what older panels already understand. The
+/// moment pools or own sentences are in play the marker grows a spec: the pool
+/// ids before the first `|`, the person's sentences after it, one per pipe.
+/// The panel parses that spec; everything except this placeholder still
+/// substitutes clock fields as before.
+///
+/// The spec is capped well under the panel's text bound, because a sentence
+/// list that outgrew the wire would silently vanish at the other end — the
+/// tail is dropped whole rather than split mid-sentence.
+fn random_banner_spec(config: &DeviceOverlayConfig) -> String {
+    const SPEC_BUDGET: usize = 900;
+    let pools = config.banner_pools.spec();
+    let customs: Vec<&str> = config
+        .banner_custom
+        .split(['；', ';', '|', '\n'])
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .collect();
+    if pools.is_empty() && customs.is_empty() {
+        return RANDOM_BANNER_PLACEHOLDER.to_owned();
+    }
+    let mut spec = format!("{{random:{pools}");
+    for line in customs {
+        if spec.len() + 1 + line.len() > SPEC_BUDGET {
+            break;
+        }
+        spec.push('|');
+        spec.push_str(line);
+    }
+    spec.push('}');
+    spec
+}
+
 /// The wire form of the strip.
 ///
 /// Typography comes from `Overlay::default_strip` and only the text travels, so
@@ -614,7 +675,7 @@ fn overlay_for(config: &DeviceOverlayConfig) -> Overlay {
     let mut strip = Overlay::default_strip();
     strip.band_px = config.band_px;
     let banner = if config.banner_random {
-        RANDOM_BANNER_PLACEHOLDER.to_owned()
+        random_banner_spec(config)
     } else {
         config.banner.clone()
     };
@@ -628,6 +689,14 @@ fn overlay_for(config: &DeviceOverlayConfig) -> Overlay {
     // layout was drawn around.
     if let Some(line) = strip.lines.last_mut() {
         line.size_px = config.banner_size;
+        line.style = config.banner_style.code();
+        // The "low" style is a size and a place as much as a look: the line
+        // gives up its anchor position so it sits near the bottom edge as a
+        // quiet caption rather than as a label the picture is arranged around.
+        if config.banner_style == BannerStyle::Low {
+            line.size_px = LOW_BANNER_SIZE;
+            line.center_y = LOW_BANNER_CENTER_Y;
+        }
         // The four playful faces are numbered in the order the panel's app
         // loads them; the three firmware faces keep the codes they have always
         // had.

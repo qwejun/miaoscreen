@@ -462,6 +462,37 @@
           "auto": "Tự động",
           "one": "Một dòng",
           "two": "Hai dòng"
+        },
+        "style": {
+          "label": "Banner style",
+          "plain": "Plain text",
+          "pill": "Pill badge",
+          "two-tone": "Two-tone",
+          "paws": "Paw prints",
+          "low": "Low caption",
+          "fade": "Faded",
+          "bubble": "Speech bubble",
+          "rainbow": "Rainbow",
+          "wave": "Wave",
+          "kaomoji": "Kaomoji",
+          "jelly": "Jelly capsule",
+          "brass": "Brass plate",
+          "wood": "Wooden plate",
+          "enamel": "Enamel sign",
+          "pink-sweet": "Pink plate",
+          "black-gold": "Black & gold plate",
+          "tag": "Hanging tag"
+        },
+        "pools": {
+          "label": "Random sentence pools",
+          "heal": "Comfort",
+          "fun": "Deadpan",
+          "poem": "Poetic",
+          "moe": "Cat voice",
+          "time": "By hour"
+        },
+        "custom": {
+          "label": "Own sentences (separate with ；)"
         }
       },
       "preview": {

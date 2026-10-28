@@ -86,7 +86,8 @@ use model_mver_dialog::build_mver_mode_dialog;
 mod models;
 mod navigation;
 pub use device_page::{
-    BannerFont, BannerRows, DeviceLink, DeviceLinkMode, DeviceLinkProblem, DeviceLinkState,
+    BannerFont, BannerPools, BannerRows, BannerStyle, DeviceLink, DeviceLinkMode,
+    DeviceLinkProblem, DeviceLinkState,
     DeviceOverlayConfig, LiveLink,
     device_page_index, install_device_link,
 };

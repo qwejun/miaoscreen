@@ -20,6 +20,7 @@ import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.nio.FloatBuffer;
 import java.nio.ShortBuffer;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Calendar;
 import java.util.HashMap;
@@ -367,16 +368,17 @@ public final class CatRenderer implements GLSurfaceView.Renderer {
             {"周日", "周一", "周二", "周三", "周四", "周五", "周六"};
 
     /**
-     * The lines the host's `{random}` marker stands for.
+     * The sentence pools the host's `{random}` marker rotates through.
      *
      * <p>They live here rather than on the host because the rotation has to keep
      * running while the host is closed, and because a clock that only advances
-     * when something reconnects is not a clock. Each is short enough to fit the
-     * bottom chord without shrinking, and the hour — not a counter — decides
-     * which one is showing, so a restart lands on the line the panel was
-     * already showing.
+     * when something reconnects is not a clock. The marker may name which pools
+     * are in rotation and carry the person's own sentences after it —
+     * `{random:heal,moe|自定义一句}` — and the hour, not a counter, decides
+     * which line of the merge is showing, so a restart lands on the line the
+     * panel was already showing.
      */
-    private static final String[] RANDOM_BANNERS = {
+    private static final String[] POOL_HEAL = {
             "今天也要加油",
             "慢慢来，比较快",
             "你已经很努力了",
@@ -398,6 +400,86 @@ public final class CatRenderer implements GLSurfaceView.Renderer {
             "你值得被夸",
             "晚上早点睡",
     };
+
+    private static final String[] POOL_FUN = {
+            "键盘上的猫毛是常态",
+            "今日bug已承包给猫",
+            "摸鱼进度99%",
+            "已进入省电模式，勿扰",
+            "工位是我的，猫也是",
+            "这条标语没有KPI",
+            "错误提示：请先摸猫",
+            "系统提示：该休息了",
+            "咖啡和猫都要有",
+            "假装很忙中",
+            "带薪吸猫，合法合规",
+            "今日运势：宜摸鱼",
+    };
+
+    private static final String[] POOL_POEM = {
+            "风把云吹慢了",
+            "光是斜的，正好",
+            "下午三点，猫打了个哈欠",
+            "窗外的天不错",
+            "茶凉了，正好歇会",
+            "尘埃在光里慢慢落",
+            "黄昏提前来了",
+            "雨停了，路上有光",
+            "夜色刚漫过窗台",
+            "今天云像一只猫",
+            "风扇把夏天摇慢了",
+            "杯子里有一小片天",
+    };
+
+    private static final String[] POOL_MOE = {
+            "今天也要喵喵向前",
+            "猫猫已上线",
+            "摸鱼喵咖营业中",
+            "困了喵，小憩一下",
+            "喵！主人加油",
+            "喵呜~摸摸我",
+            "猫猫给你打气中",
+            "一起喵喵喵",
+            "今日份猫猫已投喂",
+            "喵~要不要歇会",
+            "本喵批准你休息",
+            "喵喵打卡成功",
+    };
+
+    /** Lines for the hour you are in, five buckets over the day. */
+    private static final String[][] TIME_POOLS = {
+            { // early morning, 5-10
+                    "早，猫比你先醒",
+                    "早安，今天从猫开始",
+                    "豆浆油条，或者随便一点",
+                    "新的一天，猫先上岗",
+            },
+            { // noon, 11-13
+                    "午饭别糊弄",
+                    "吃完起来晃晃",
+                    "午休十分钟，猫先示范",
+            },
+            { // afternoon, 14-18
+                    "下午茶时间到",
+                    "再撑一会就下班",
+                    "起来倒杯水吧",
+                    "窗外的光正好",
+            },
+            { // evening, 19-23
+                    "下班了，猫在等你",
+                    "晚饭想好吃什么了吗",
+                    "晚上早点回",
+                    "今晚也辛苦啦",
+            },
+            { // deep night, 0-4
+                    "还没睡啊，猫先睡了",
+                    "屏幕调暗点",
+                    "深夜了，手机放下吧",
+                    "晚安，明天见",
+            },
+    };
+
+    private static final String KAOMOJI = "(=^･ω･^=)";
 
     private Overlay overlay;
     private int overlayProgram;
@@ -1015,22 +1097,7 @@ public final class CatRenderer implements GLSurfaceView.Renderer {
             float rowHeight = line.sizePx * TEXT_LINE_HEIGHT_SHARE;
             int rows = fitRows(bandRendered[i], line.rows, centerY, rowHeight);
             float firstRowY = centerY - (rows - 1) * rowHeight * 0.5f;
-            for (int r = 0; r < rows; r++) {
-                String row = bandRows[r];
-                if (row.length() == 0) {
-                    continue;
-                }
-                // Each row is placed by its own height, because the chord it
-                // has to clear is a different width than the row above it.
-                float rowY = firstRowY + r * rowHeight;
-                // Vertical centring by hand: the baseline that puts the glyph
-                // box's centre on the row's own centre.
-                bandCanvas.drawText(
-                        row,
-                        paintX(align, rowY, row),
-                        rowY - (metrics.ascent + metrics.descent) * 0.5f,
-                        bandPaint);
-            }
+            drawBannerRows(line, align, rows, firstRowY, rowHeight, metrics);
         }
         return true;
     }
@@ -1124,6 +1191,450 @@ public final class CatRenderer implements GLSurfaceView.Renderer {
     private boolean fits(String text, float screenY) {
         return bandPaint.measureText(text) <= chordWidthAt(screenY)
                 - 2f * BAND_TEXT_EDGE_PADDING_PX;
+    }
+
+    // ---------------------------------------------------------------------
+    // Banner dressing. The codes come in the line's style halfword; the
+    // drawing happens here, around the same fitted rows the plain path lays
+    // out, so every style inherits the bezel-aware break for free.
+    // ---------------------------------------------------------------------
+
+    private static final int BANNER_INK = 0xFF3A3A40;
+    private static final int BANNER_AMBER = 0xFFF0A83C;
+    private static final int BANNER_PINK = 0xFFF27C7C;
+    private static final int BANNER_BUBBLE = 0xFFFAFAF8;
+    private static final int BANNER_PILL = 0xFF282B31;
+    private static final int BANNER_PILL_EDGE = 0xFF3A3E46;
+    private static final int[] RAINBOW = {
+            0xFFFF99AA, 0xFFFFB76E, 0xFFFFDC6E, 0xFF96E196,
+            0xFF78CDF0, 0xFFBEA0F5, 0xFFF596C8,
+    };
+    private static final int BANNER_JELLY = 0xFFFFC4D2;
+    private static final int BANNER_JELLY_SHINE = 0xFFFFE4EB;
+    private static final int BANNER_JELLY_TEXT = 0xFF963E54;
+    private static final int BANNER_BRASS = 0xFFC6A05A;
+    private static final int BANNER_BRASS_DARK = 0xFF967236;
+    private static final int BANNER_BRASS_LINE = 0xFFE8CA84;
+    private static final int BANNER_BRASS_TEXT = 0xFF4A3612;
+    private static final int BANNER_BRASS_SHINE = 0xFFF0D89E;
+    private static final int BANNER_WOOD = 0xFF946840;
+    private static final int BANNER_WOOD_DARK = 0xFF684628;
+    private static final int BANNER_WOOD_GRAIN = 0xFF7E5632;
+    private static final int BANNER_WOOD_TEXT = 0xFFF6E8CE;
+    private static final int BANNER_ENAMEL = 0xFFF9F9F7;
+    private static final int BANNER_ENAMEL_EDGE = 0xFFD6DAE2;
+    private static final int BANNER_ENAMEL_LINE = 0xFF34447A;
+    private static final int BANNER_ENAMEL_TEXT = 0xFF2A3A74;
+    private static final int BANNER_SWEET = 0xFFFFD6E0;
+    private static final int BANNER_SWEET_EDGE = 0xFFE2829E;
+    private static final int BANNER_SWEET_HEART = 0xFFEE7896;
+    private static final int BANNER_SWEET_TEXT = 0xFFC44668;
+    private static final int BANNER_GOLD_PLATE = 0xFF1E1E22;
+    private static final int BANNER_GOLD_EDGE = 0xFF0A0A0C;
+    private static final int BANNER_GOLD_LINE = 0xFFCCAC5E;
+    private static final int BANNER_GOLD_TEXT = 0xFFE2C270;
+    private static final int BANNER_TAG = 0xFFF6F0E0;
+    private static final int BANNER_TAG_EDGE = 0xFFC4B28E;
+    private static final int BANNER_TAG_TEXT = 0xFF604A2E;
+    private static final int BANNER_TAG_STRING = 0xFFB4B0A8;
+
+    private final Path bannerPath = new Path();
+
+    /**
+     * Draws the fitted rows of a strip line, dressed however the style asks.
+     *
+     * <p>Plain is the path the strip has always taken. Surface styles draw a
+     * plate or bubble behind the block and clear the drop shadow first, the
+     * way the clock card does — a shadow under a filled surface reads as a
+     * smudge. Ink styles only change the colour or the per-character layout.
+     */
+    private void drawBannerRows(Overlay.Line line, int align, int rows,
+            float firstRowY, float rowHeight, Paint.FontMetrics metrics) {
+        if (line.style == Overlay.STYLE_PLAIN || line.style == Overlay.STYLE_LOW) {
+            drawPlainRows(align, rows, firstRowY, rowHeight, metrics, line.color, 1f);
+            return;
+        }
+
+        float size = line.sizePx;
+        float widest = 0f;
+        for (int r = 0; r < rows; r++) {
+            widest = Math.max(widest, bandPaint.measureText(bandRows[r]));
+        }
+        float cx = bandWidth * 0.5f;
+        float blockH = rows * rowHeight;
+        float blockTop = firstRowY - blockH * 0.5f;
+        float blockBottom = firstRowY + blockH * 0.5f;
+        float boxLeft = cx - widest * 0.5f - size * 1.05f;
+        float boxRight = cx + widest * 0.5f + size * 1.05f;
+        float boxTop = blockTop - size * 0.5f;
+        float boxBottom = blockBottom + size * 0.5f;
+
+        switch (line.style) {
+            case Overlay.STYLE_FADE: {
+                drawPlainRows(align, rows, firstRowY, rowHeight, metrics, line.color, 0.51f);
+                break;
+            }
+            case Overlay.STYLE_PILL: {
+                bandPaint.clearShadowLayer();
+                for (int r = 0; r < rows; r++) {
+                    if (bandRows[r].length() == 0) {
+                        continue;
+                    }
+                    float rowY = firstRowY + r * rowHeight;
+                    float w = bandPaint.measureText(bandRows[r]);
+                    float h = rowHeight * 0.86f;
+                    bandPaint.setStyle(Paint.Style.FILL);
+                    bandPaint.setColor(BANNER_PILL);
+                    bandCanvas.drawRoundRect(cx - w * 0.5f - size * 0.9f, rowY - h * 0.5f,
+                            cx + w * 0.5f + size * 0.9f, rowY + h * 0.5f,
+                            h * 0.5f, h * 0.5f, bandPaint);
+                    bandPaint.setStyle(Paint.Style.STROKE);
+                    bandPaint.setColor(BANNER_PILL_EDGE);
+                    bandPaint.setStrokeWidth(1f);
+                    bandCanvas.drawRoundRect(cx - w * 0.5f - size * 0.9f, rowY - h * 0.5f,
+                            cx + w * 0.5f + size * 0.9f, rowY + h * 0.5f,
+                            h * 0.5f, h * 0.5f, bandPaint);
+                }
+                bandPaint.setStyle(Paint.Style.FILL);
+                drawPlainRows(align, rows, firstRowY, rowHeight, metrics, line.color, 1f);
+                break;
+            }
+            case Overlay.STYLE_TWO_TONE: {
+                for (int r = 0; r < rows; r++) {
+                    String row = bandRows[r];
+                    if (row.length() == 0) {
+                        continue;
+                    }
+                    float rowY = firstRowY + r * rowHeight;
+                    int cut = firstPunctuation(row);
+                    if (cut <= 0) {
+                        bandPaint.setColor(line.color);
+                        bandCanvas.drawText(row, paintX(align, rowY, row),
+                                baselineOf(rowY, metrics), bandPaint);
+                    } else {
+                        String head = row.substring(0, cut);
+                        float headW = bandPaint.measureText(head);
+                        float startX = rowStartX(align, rowY, row);
+                        bandPaint.setTextAlign(Paint.Align.LEFT);
+                        bandPaint.setColor(BANNER_AMBER);
+                        bandCanvas.drawText(head, startX, baselineOf(rowY, metrics), bandPaint);
+                        bandPaint.setColor(line.color);
+                        bandCanvas.drawText(row.substring(cut), startX + headW,
+                                baselineOf(rowY, metrics), bandPaint);
+                        bandPaint.setTextAlign(paintAlign(align));
+                    }
+                }
+                break;
+            }
+            case Overlay.STYLE_PAWS: {
+                drawPlainRows(align, rows, firstRowY, rowHeight, metrics, line.color, 1f);
+                float unit = size * 0.28f;
+                float rowY = widestRowY(rows, firstRowY, rowHeight);
+                float gap = widest * 0.5f + size * 1.1f;
+                drawBannerPaw(cx - gap, rowY, unit, BANNER_PINK);
+                drawBannerPaw(cx + gap, rowY, unit, BANNER_PINK);
+                break;
+            }
+            case Overlay.STYLE_BUBBLE: {
+                bandPaint.clearShadowLayer();
+                bandPaint.setStyle(Paint.Style.FILL);
+                bandPaint.setColor(BANNER_BUBBLE);
+                float radius = size * 0.8f;
+                bandCanvas.drawRoundRect(boxLeft, boxTop, boxRight, boxBottom,
+                        radius, radius, bandPaint);
+                // The tail leans up-left, toward where the cat sits.
+                bannerPath.reset();
+                bannerPath.moveTo(cx - size * 2.3f, boxTop + 2f);
+                bannerPath.lineTo(cx - size * 0.5f, boxTop + 2f);
+                bannerPath.lineTo(cx - size * 1.7f, boxTop - size * 1.15f);
+                bannerPath.close();
+                bandCanvas.drawPath(bannerPath, bandPaint);
+                drawPlainRows(align, rows, firstRowY, rowHeight, metrics, BANNER_INK, 1f);
+                break;
+            }
+            case Overlay.STYLE_RAINBOW: {
+                for (int r = 0; r < rows; r++) {
+                    String row = bandRows[r];
+                    if (row.length() == 0) {
+                        continue;
+                    }
+                    float rowY = firstRowY + r * rowHeight;
+                    float x = rowStartX(align, rowY, row);
+                    for (int c = 0; c < row.length(); c++) {
+                        bandPaint.setColor(RAINBOW[c % RAINBOW.length]);
+                        String glyph = String.valueOf(row.charAt(c));
+                        bandCanvas.drawText(glyph, x, baselineOf(rowY, metrics), bandPaint);
+                        x += bandPaint.measureText(glyph);
+                    }
+                }
+                break;
+            }
+            case Overlay.STYLE_WAVE: {
+                for (int r = 0; r < rows; r++) {
+                    String row = bandRows[r];
+                    if (row.length() == 0) {
+                        continue;
+                    }
+                    float rowY = firstRowY + r * rowHeight;
+                    float x = rowStartX(align, rowY, row);
+                    for (int c = 0; c < row.length(); c++) {
+                        float dy = (c % 2 == 0) ? -size * 0.18f : size * 0.18f;
+                        bandPaint.setColor(line.color);
+                        String glyph = String.valueOf(row.charAt(c));
+                        bandCanvas.drawText(glyph, x, baselineOf(rowY, metrics) + dy, bandPaint);
+                        x += bandPaint.measureText(glyph);
+                    }
+                }
+                break;
+            }
+            case Overlay.STYLE_KAOMOJI: {
+                drawPlainRows(align, rows, firstRowY, rowHeight, metrics, line.color, 1f);
+                float rowY = widestRowY(rows, firstRowY, rowHeight);
+                float small = size * 0.58f;
+                bandPaint.setTextSize(small);
+                bandPaint.setTextAlign(Paint.Align.LEFT);
+                float gap = widest * 0.5f + small * 1.6f;
+                bandPaint.setColor(BANNER_AMBER);
+                float base = baselineOf(rowY, metrics);
+                bandCanvas.drawText(KAOMOJI, cx - gap - bandPaint.measureText(KAOMOJI),
+                        base, bandPaint);
+                bandCanvas.drawText(KAOMOJI, cx + gap, base, bandPaint);
+                bandPaint.setTextSize(size);
+                bandPaint.setTextAlign(paintAlign(align));
+                break;
+            }
+            case Overlay.STYLE_JELLY: {
+                bandPaint.clearShadowLayer();
+                plateBox(boxLeft, boxTop, boxRight, boxBottom, size * 1.2f,
+                        BANNER_SWEET_EDGE, BANNER_JELLY, BANNER_JELLY_SHINE, size * 0.14f);
+                // The highlight that makes it read as jelly rather than paint.
+                bandPaint.setStyle(Paint.Style.STROKE);
+                bandPaint.setColor(BANNER_JELLY_SHINE);
+                bandPaint.setStrokeWidth(size * 0.14f);
+                bandPaint.setStrokeCap(Paint.Cap.ROUND);
+                bandCanvas.drawArc(boxLeft + size * 0.5f, boxTop + size * 0.32f,
+                        boxLeft + size * 2.4f, boxBottom - size * 0.9f, 40f, 90f, false, bandPaint);
+                bandPaint.setStyle(Paint.Style.FILL);
+                drawPlainRows(align, rows, firstRowY, rowHeight, metrics, BANNER_JELLY_TEXT, 1f);
+                break;
+            }
+            case Overlay.STYLE_BRASS: {
+                bandPaint.clearShadowLayer();
+                plateBox(boxLeft, boxTop, boxRight, boxBottom, size * 0.34f,
+                        BANNER_BRASS_DARK, BANNER_BRASS, BANNER_BRASS_LINE, size * 0.07f);
+                plateScrews(boxLeft, boxTop, boxRight, boxBottom,
+                        0xFF765A2A, 0xFF564018);
+                for (int r = 0; r < rows; r++) {
+                    String row = bandRows[r];
+                    if (row.length() == 0) {
+                        continue;
+                    }
+                    float rowY = firstRowY + r * rowHeight;
+                    float base = baselineOf(rowY, metrics);
+                    // Engraving: a light lip under a dark cut.
+                    bandPaint.setColor(BANNER_BRASS_SHINE);
+                    bandCanvas.drawText(row, paintX(align, rowY, row), base + size * 0.05f,
+                            bandPaint);
+                    bandPaint.setColor(BANNER_BRASS_TEXT);
+                    bandCanvas.drawText(row, paintX(align, rowY, row), base, bandPaint);
+                }
+                break;
+            }
+            case Overlay.STYLE_WOOD: {
+                bandPaint.clearShadowLayer();
+                plateBox(boxLeft, boxTop, boxRight, boxBottom, size * 0.42f,
+                        BANNER_WOOD_DARK, BANNER_WOOD, 0, 0);
+                bandPaint.setStyle(Paint.Style.STROKE);
+                bandPaint.setColor(BANNER_WOOD_GRAIN);
+                bandPaint.setStrokeWidth(size * 0.06f);
+                for (float gy = boxTop + size * 0.42f; gy < boxBottom - size * 0.2f;
+                        gy += size * 0.34f) {
+                    bandCanvas.drawLine(boxLeft + size * 0.55f, gy,
+                            boxRight - size * 0.55f, gy + size * 0.06f, bandPaint);
+                }
+                bandPaint.setStyle(Paint.Style.FILL);
+                drawPlainRows(align, rows, firstRowY, rowHeight, metrics, BANNER_WOOD_TEXT, 1f);
+                break;
+            }
+            case Overlay.STYLE_ENAMEL: {
+                bandPaint.clearShadowLayer();
+                plateBox(boxLeft, boxTop, boxRight, boxBottom, size * 0.34f,
+                        BANNER_ENAMEL_EDGE, BANNER_ENAMEL, BANNER_ENAMEL_LINE, size * 0.07f);
+                bandPaint.setStyle(Paint.Style.FILL);
+                bandPaint.setColor(0xFF202228);
+                float holeY = (boxTop + boxBottom) * 0.5f;
+                bandCanvas.drawCircle(boxLeft + size * 0.62f, holeY, size * 0.14f, bandPaint);
+                bandCanvas.drawCircle(boxRight - size * 0.62f, holeY, size * 0.14f, bandPaint);
+                drawPlainRows(align, rows, firstRowY, rowHeight, metrics, BANNER_ENAMEL_TEXT, 1f);
+                break;
+            }
+            case Overlay.STYLE_PINK_SWEET: {
+                bandPaint.clearShadowLayer();
+                plateBox(boxLeft, boxTop, boxRight, boxBottom, size * 0.62f,
+                        BANNER_SWEET_EDGE, BANNER_SWEET, 0xFFFFFFFF, size * 0.07f);
+                float heartY = (boxTop + boxBottom) * 0.5f;
+                drawBannerHeart(boxLeft + size * 0.78f, heartY, size * 0.3f, BANNER_SWEET_HEART);
+                drawBannerHeart(boxRight - size * 0.78f, heartY, size * 0.3f, BANNER_SWEET_HEART);
+                drawPlainRows(align, rows, firstRowY, rowHeight, metrics, BANNER_SWEET_TEXT, 1f);
+                break;
+            }
+            case Overlay.STYLE_BLACK_GOLD: {
+                bandPaint.clearShadowLayer();
+                plateBox(boxLeft, boxTop, boxRight, boxBottom, size * 0.34f,
+                        BANNER_GOLD_EDGE, BANNER_GOLD_PLATE, BANNER_GOLD_LINE, size * 0.07f);
+                drawPlainRows(align, rows, firstRowY, rowHeight, metrics, BANNER_GOLD_TEXT, 1f);
+                break;
+            }
+            case Overlay.STYLE_TAG: {
+                bandPaint.clearShadowLayer();
+                float midY = (blockTop + blockBottom) * 0.5f;
+                bandCanvas.save();
+                bandCanvas.rotate(5f, cx, midY);
+                // The string comes down from the desk edge the tag hangs on.
+                bandPaint.setStyle(Paint.Style.STROKE);
+                bandPaint.setColor(BANNER_TAG_STRING);
+                bandPaint.setStrokeWidth(size * 0.09f);
+                bandCanvas.drawLine(cx + size * 0.7f, boxTop - size * 1.9f, cx,
+                        boxTop + size * 0.5f, bandPaint);
+                bandPaint.setStyle(Paint.Style.FILL);
+                plateBox(boxLeft, boxTop, boxRight, boxBottom, size * 0.46f,
+                        BANNER_TAG_EDGE, BANNER_TAG, 0, 0);
+                bandPaint.setColor(0xFF202226);
+                bandCanvas.drawCircle(cx, boxTop + size * 0.5f, size * 0.22f, bandPaint);
+                drawPlainRows(align, rows, firstRowY, rowHeight, metrics, BANNER_TAG_TEXT, 1f);
+                bandCanvas.restore();
+                break;
+            }
+            default:
+                drawPlainRows(align, rows, firstRowY, rowHeight, metrics, line.color, 1f);
+                break;
+        }
+        bandPaint.setAlpha(255);
+    }
+
+    /** The undecorated path: one draw per row, in the line's own colour. */
+    private void drawPlainRows(int align, int rows, float firstRowY, float rowHeight,
+            Paint.FontMetrics metrics, int color, float alpha) {
+        // Colour first, alpha second: setColor would overwrite the alpha that
+        // setAlpha stored, and the faded style would come out opaque.
+        bandPaint.setColor(color);
+        bandPaint.setAlpha(Math.round(255f * alpha));
+        for (int r = 0; r < rows; r++) {
+            String row = bandRows[r];
+            if (row.length() == 0) {
+                continue;
+            }
+            float rowY = firstRowY + r * rowHeight;
+            bandCanvas.drawText(
+                    row,
+                    paintX(align, rowY, row),
+                    baselineOf(rowY, metrics),
+                    bandPaint);
+        }
+        bandPaint.setAlpha(255);
+    }
+
+    /**
+     * Where a row starts when the caller has to place pieces along it — the
+     * two-tone halves and the per-character styles. The plain path anchors by
+     * the paint's align; these styles need the row's left edge instead.
+     */
+    private float rowStartX(int align, float rowY, String row) {
+        float anchor = paintX(align, rowY, row);
+        switch (paintAlign(align)) {
+            case LEFT:
+                return anchor;
+            case RIGHT:
+                return anchor - bandPaint.measureText(row);
+            default:
+                return anchor - bandPaint.measureText(row) * 0.5f;
+        }
+    }
+
+    private float baselineOf(float rowY, Paint.FontMetrics metrics) {
+        return rowY - (metrics.ascent + metrics.descent) * 0.5f;
+    }
+
+    private float widestRowY(int rows, float firstRowY, float rowHeight) {
+        int best = 0;
+        float bestW = -1f;
+        for (int r = 0; r < rows; r++) {
+            float w = bandPaint.measureText(bandRows[r]);
+            if (w > bestW) {
+                bestW = w;
+                best = r;
+            }
+        }
+        return firstRowY + best * rowHeight;
+    }
+
+    /** Index of the first real punctuation mark, or -1 when the row has none. */
+    private static int firstPunctuation(String row) {
+        for (int i = 0; i < row.length(); i++) {
+            char c = row.charAt(i);
+            if (c != ' ' && c != '\t' && isBreakAfter(c)) {
+                return i;
+            }
+        }
+        return -1;
+    }
+
+    /** A filled plate with a darker edge and an optional inner rule line. */
+    private void plateBox(float left, float top, float right, float bottom, float radius,
+            int edge, int fill, int line, float lineWidth) {
+        bandPaint.setStyle(Paint.Style.FILL);
+        bandPaint.setColor(edge);
+        bandCanvas.drawRoundRect(left, top, right, bottom, radius, radius, bandPaint);
+        bandPaint.setColor(fill);
+        bandCanvas.drawRoundRect(left + 3f, top + 3f, right - 3f, bottom - 3f,
+                Math.max(2f, radius - 3f), Math.max(2f, radius - 3f), bandPaint);
+        if (line != 0) {
+            bandPaint.setStyle(Paint.Style.STROKE);
+            bandPaint.setColor(line);
+            bandPaint.setStrokeWidth(lineWidth);
+            float inset = Math.max(4f, lineWidth * 2.6f);
+            bandCanvas.drawRoundRect(left + inset, top + inset, right - inset, bottom - inset,
+                    Math.max(2f, radius - inset * 0.6f), Math.max(2f, radius - inset * 0.6f),
+                    bandPaint);
+        }
+    }
+
+    /** One slotted screw in each corner of the box. */
+    private void plateScrews(float left, float top, float right, float bottom,
+            int body, int slot) {
+        bandPaint.setStyle(Paint.Style.FILL);
+        float inset = 14f;
+        for (float sx : new float[]{left + inset, right - inset}) {
+            for (float sy : new float[]{top + inset, bottom - inset}) {
+                bandPaint.setColor(body);
+                bandCanvas.drawCircle(sx, sy, 4.5f, bandPaint);
+                bandPaint.setColor(slot);
+                bandCanvas.drawLine(sx - 2.8f, sy - 2.8f, sx + 2.8f, sy + 2.8f, bandPaint);
+            }
+        }
+    }
+
+    /** The pink paw print, sized by {@code unit} the way the card's paw is. */
+    private void drawBannerPaw(float cx, float cy, float unit, int color) {
+        bandPaint.setStyle(Paint.Style.FILL);
+        bandPaint.setColor(color);
+        bandCanvas.drawCircle(cx, cy + 2.6f * unit, 4.4f * unit, bandPaint);
+        bandCanvas.drawCircle(cx - 4.6f * unit, cy - 1.6f * unit, 2.1f * unit, bandPaint);
+        bandCanvas.drawCircle(cx, cy - 3.6f * unit, 2.4f * unit, bandPaint);
+        bandCanvas.drawCircle(cx + 4.6f * unit, cy - 1.6f * unit, 2.1f * unit, bandPaint);
+    }
+
+    private void drawBannerHeart(float cx, float cy, float s, int color) {
+        bandPaint.setStyle(Paint.Style.FILL);
+        bandPaint.setColor(color);
+        bandCanvas.drawCircle(cx - 0.42f * s, cy - 0.3f * s, 0.55f * s, bandPaint);
+        bandCanvas.drawCircle(cx + 0.42f * s, cy - 0.3f * s, 0.55f * s, bandPaint);
+        bannerPath.reset();
+        bannerPath.moveTo(cx - 0.92f * s, cy - 0.12f * s);
+        bannerPath.lineTo(cx + 0.92f * s, cy - 0.12f * s);
+        bannerPath.lineTo(cx, cy + 0.95f * s);
+        bannerPath.close();
+        bandCanvas.drawPath(bannerPath, bandPaint);
     }
 
     /**
@@ -1362,27 +1873,100 @@ public final class CatRenderer implements GLSurfaceView.Renderer {
                 out.append(WEEKDAYS[calendar.get(Calendar.DAY_OF_WEEK) - 1]);
                 break;
             case "random":
+            case "random:":
                 // One line per hour, derived from the clock so that reconnects
                 // and restarts land on the same one.
-                out.append(RANDOM_BANNERS[randomBannerSlot(calendar)]);
+                out.append(randomBanner("", calendar));
                 break;
             default:
+                if (field.startsWith("random:")) {
+                    out.append(randomBanner(field.substring(7), calendar));
+                    break;
+                }
                 out.append('{').append(field).append('}');
                 break;
         }
     }
 
     /**
-     * Which random line the wall clock selects, one per hour.
+     * The sentence the random marker stands for this hour.
      *
-     * <p>A negative millisecond value is possible before 1970, and `%` keeps the
-     * sign of its left operand, so the result is folded back by hand. `floorMod`
-     * would do it, but it is API 24 and this panel is on 22.
+     * <p>The spec after the colon names the pools in rotation — `heal`, `fun`,
+     * `poem`, `moe`, `time` — and carries the person's own sentences after the
+     * first pipe, one per pipe. An empty spec means everything, which is what
+     * the bare `{random}` a previous host wrote has always meant. The hour
+     * picks the line out of the merge, so the rotation keeps running while the
+     * host is closed and lands where it left off after a restart.
      */
-    private static int randomBannerSlot(Calendar calendar) {
-        int count = RANDOM_BANNERS.length;
+    private static String randomBanner(String spec, Calendar calendar) {
+        ArrayList<String> merged = new ArrayList<>();
+        String poolsPart = spec;
+        int pipe = spec.indexOf('|');
+        if (pipe >= 0) {
+            poolsPart = spec.substring(0, pipe);
+            for (String own : spec.substring(pipe + 1).split("\\|")) {
+                String line = own.trim();
+                if (!line.isEmpty()) {
+                    merged.add(line);
+                }
+            }
+        }
+        if (poolsPart.isEmpty()) {
+            addPool(merged, POOL_HEAL);
+            addPool(merged, POOL_FUN);
+            addPool(merged, POOL_POEM);
+            addPool(merged, POOL_MOE);
+            addPool(merged, timePool(calendar));
+        } else {
+            for (String id : poolsPart.split(",")) {
+                switch (id.trim()) {
+                    case "heal":
+                        addPool(merged, POOL_HEAL);
+                        break;
+                    case "fun":
+                        addPool(merged, POOL_FUN);
+                        break;
+                    case "poem":
+                        addPool(merged, POOL_POEM);
+                        break;
+                    case "moe":
+                        addPool(merged, POOL_MOE);
+                        break;
+                    case "time":
+                        addPool(merged, timePool(calendar));
+                        break;
+                    default:
+                        break;
+                }
+            }
+        }
+        if (merged.isEmpty()) {
+            return POOL_HEAL[0];
+        }
+        int count = merged.size();
         long hours = calendar.getTimeInMillis() / 3_600_000L;
-        return (int) (((hours % count) + count) % count);
+        int slot = (int) (((hours % count) + count) % count);
+        return merged.get(slot);
+    }
+
+    private static void addPool(ArrayList<String> merged, String[] pool) {
+        merged.addAll(Arrays.asList(pool));
+    }
+
+    /** Which bucket of the day this hour belongs to. */
+    private static String[] timePool(Calendar calendar) {
+        switch (calendar.get(Calendar.HOUR_OF_DAY)) {
+            case 5: case 6: case 7: case 8: case 9: case 10:
+                return TIME_POOLS[0];
+            case 11: case 12: case 13:
+                return TIME_POOLS[1];
+            case 14: case 15: case 16: case 17: case 18:
+                return TIME_POOLS[2];
+            case 19: case 20: case 21: case 22: case 23:
+                return TIME_POOLS[3];
+            default:
+                return TIME_POOLS[4];
+        }
     }
 
     private static String pad(int value, int width) {

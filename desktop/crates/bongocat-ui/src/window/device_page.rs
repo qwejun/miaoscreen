@@ -92,6 +92,179 @@ impl BannerFont {
     }
 }
 
+/// How the banner is dressed on the panel.
+///
+/// The codes travel as the line's style halfword and the drawing lives entirely
+/// on the panel: only the choice crosses the wire. The first code is plain text
+/// so a panel older than this setting reads zero and behaves as before.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum BannerStyle {
+    /// Bare text, the way the strip has always looked.
+    Plain,
+    /// A dark pill behind the line, like a badge.
+    Pill,
+    /// The words before the first punctuation in amber, the rest in white.
+    TwoTone,
+    /// A pink paw print at each side of the line.
+    Paws,
+    /// Smaller and lower, so the line reads as part of the scene.
+    Low,
+    /// The line at half opacity, blended into the black.
+    Fade,
+    /// A speech bubble whose tail points at the cat.
+    Bubble,
+    /// One colour per character, pastel on black.
+    Rainbow,
+    /// Characters alternating high and low, skipping along the row.
+    Wave,
+    /// A cat kaomoji at each side of the line.
+    Kaomoji,
+    /// A pink jelly capsule with a highlight and dark plum text.
+    Jelly,
+    /// A brass plate with corner screws and engraved text.
+    Brass,
+    /// A wood plank with grain and cream text.
+    Wood,
+    /// A white enamel sign with a navy border and mounting holes.
+    Enamel,
+    /// A pink plate with a white double border and side hearts.
+    PinkSweet,
+    /// A near-black plate with a gold border and gold text.
+    BlackGold,
+    /// A cream tag hanging from a string, slightly tilted.
+    Tag,
+}
+
+impl BannerStyle {
+    pub fn id(self) -> &'static str {
+        match self {
+            Self::Plain => "plain",
+            Self::Pill => "pill",
+            Self::TwoTone => "two-tone",
+            Self::Paws => "paws",
+            Self::Low => "low",
+            Self::Fade => "fade",
+            Self::Bubble => "bubble",
+            Self::Rainbow => "rainbow",
+            Self::Wave => "wave",
+            Self::Kaomoji => "kaomoji",
+            Self::Jelly => "jelly",
+            Self::Brass => "brass",
+            Self::Wood => "wood",
+            Self::Enamel => "enamel",
+            Self::PinkSweet => "pink-sweet",
+            Self::BlackGold => "black-gold",
+            Self::Tag => "tag",
+        }
+    }
+
+    /// The wire code, which is the panel's `STYLE_*` numbering.
+    pub fn code(self) -> u16 {
+        match self {
+            Self::Plain => 0,
+            Self::Pill => 1,
+            Self::TwoTone => 2,
+            Self::Paws => 3,
+            Self::Low => 4,
+            Self::Fade => 5,
+            Self::Bubble => 6,
+            Self::Rainbow => 7,
+            Self::Wave => 8,
+            Self::Kaomoji => 9,
+            Self::Jelly => 10,
+            Self::Brass => 11,
+            Self::Wood => 12,
+            Self::Enamel => 13,
+            Self::PinkSweet => 14,
+            Self::BlackGold => 15,
+            Self::Tag => 16,
+        }
+    }
+
+    pub fn from_id(id: &str) -> Option<Self> {
+        match id {
+            "plain" => Some(Self::Plain),
+            "pill" => Some(Self::Pill),
+            "two-tone" => Some(Self::TwoTone),
+            "paws" => Some(Self::Paws),
+            "low" => Some(Self::Low),
+            "fade" => Some(Self::Fade),
+            "bubble" => Some(Self::Bubble),
+            "rainbow" => Some(Self::Rainbow),
+            "wave" => Some(Self::Wave),
+            "kaomoji" => Some(Self::Kaomoji),
+            "jelly" => Some(Self::Jelly),
+            "brass" => Some(Self::Brass),
+            "wood" => Some(Self::Wood),
+            "enamel" => Some(Self::Enamel),
+            "pink-sweet" => Some(Self::PinkSweet),
+            "black-gold" => Some(Self::BlackGold),
+            "tag" => Some(Self::Tag),
+            _ => None,
+        }
+    }
+}
+
+/// Which sentence pools the panel rotates a random banner through.
+///
+/// Five switches rather than one list so the page never needs a control the
+/// settings kit does not have: a pool that is off simply contributes nothing.
+/// With everything on the rotation is the union, and with everything off the
+/// panel falls back to the whole set rather than going blank.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct BannerPools {
+    /// Comfort and encouragement — what the first build shipped.
+    pub heal: bool,
+    /// Deadpan office-cat jokes.
+    pub fun: bool,
+    /// Short lines about the scene rather than the reader.
+    pub poem: bool,
+    /// Cat-voiced lines, heavy on the 喵.
+    pub moe: bool,
+    /// Lines picked by the hour: morning, noon, evening, late night.
+    pub time: bool,
+}
+
+impl Default for BannerPools {
+    fn default() -> Self {
+        Self {
+            heal: true,
+            fun: true,
+            poem: true,
+            moe: true,
+            time: true,
+        }
+    }
+}
+
+impl BannerPools {
+    /// The enabled pool ids in wire order, or all of them when nothing is
+    /// enabled — a rotation the person emptied should fall back to the whole
+    /// set rather than to one stale sentence.
+    pub fn spec(&self) -> String {
+        let mut ids = Vec::new();
+        if self.heal {
+            ids.push("heal");
+        }
+        if self.fun {
+            ids.push("fun");
+        }
+        if self.poem {
+            ids.push("poem");
+        }
+        if self.moe {
+            ids.push("moe");
+        }
+        if self.time {
+            ids.push("time");
+        }
+        if ids.len() == 5 || ids.is_empty() {
+            return String::new();
+        }
+        ids.join(",")
+    }
+}
+
 /// How many rows the banner is allowed to take.
 ///
 /// <p>The panel does the breaking, because a random banner is chosen there and
@@ -145,6 +318,12 @@ pub struct DeviceOverlayConfig {
     pub banner_size: u16,
     pub banner_font: BannerFont,
     pub banner_rows: BannerRows,
+    /// How the banner is dressed on the panel.
+    pub banner_style: BannerStyle,
+    /// Which random pools are in rotation.
+    pub banner_pools: BannerPools,
+    /// The person's own sentences, one per `；`, rotated with the pools.
+    pub banner_custom: String,
 }
 
 impl Default for DeviceOverlayConfig {
@@ -164,6 +343,9 @@ impl Default for DeviceOverlayConfig {
             banner_size: 30,
             banner_font: BannerFont::Kuaile,
             banner_rows: BannerRows::Auto,
+            banner_style: BannerStyle::Plain,
+            banner_pools: BannerPools::default(),
+            banner_custom: String::new(),
         }
     }
 }

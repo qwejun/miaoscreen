@@ -812,6 +812,218 @@ impl Render for SettingsView {
                                     },
                                 ),
                             ),
+                            SettingItem::new(
+                                bongocat_i18n::text(
+                                    language.catalog_locale(),
+                                    "settings.device_screen.banner.style.label",
+                                ),
+                                SettingField::dropdown(
+                                    [
+                                        BannerStyle::Plain,
+                                        BannerStyle::Pill,
+                                        BannerStyle::TwoTone,
+                                        BannerStyle::Paws,
+                                        BannerStyle::Low,
+                                        BannerStyle::Fade,
+                                        BannerStyle::Bubble,
+                                        BannerStyle::Rainbow,
+                                        BannerStyle::Wave,
+                                        BannerStyle::Kaomoji,
+                                        BannerStyle::Jelly,
+                                        BannerStyle::Brass,
+                                        BannerStyle::Wood,
+                                        BannerStyle::Enamel,
+                                        BannerStyle::PinkSweet,
+                                        BannerStyle::BlackGold,
+                                        BannerStyle::Tag,
+                                    ]
+                                    .into_iter()
+                                    .map(|style| {
+                                        let key = format!(
+                                            "settings.device_screen.banner.style.{}",
+                                            style.id()
+                                        );
+                                        (
+                                            SharedString::from(style.id()),
+                                            SharedString::from(bongocat_i18n::text(
+                                                language.catalog_locale(),
+                                                &key,
+                                            )),
+                                        )
+                                    })
+                                    .collect(),
+                                    {
+                                        let view = view_entity.clone();
+                                        move |app: &App| {
+                                            SharedString::from(
+                                                view.read(app).device_config().banner_style.id(),
+                                            )
+                                        }
+                                    },
+                                    {
+                                        let view = view_entity.clone();
+                                        move |value: SharedString, app: &mut App| {
+                                            let style = BannerStyle::from_id(&value)
+                                                .unwrap_or(BannerStyle::Plain);
+                                            view.update(app, |view, cx| {
+                                                view.update_device_config(
+                                                    |config| config.banner_style = style,
+                                                    cx,
+                                                );
+                                            });
+                                        }
+                                    },
+                                ),
+                            ),
+                            SettingItem::new(
+                                bongocat_i18n::text(
+                                    language.catalog_locale(),
+                                    "settings.device_screen.banner.pools.heal",
+                                ),
+                                SettingField::switch(
+                                    {
+                                        let view = view_entity.clone();
+                                        move |app| {
+                                            view.read(app).device_config().banner_pools.heal
+                                        }
+                                    },
+                                    {
+                                        let view = view_entity.clone();
+                                        move |value: bool, app: &mut App| {
+                                            view.update(app, |view, cx| {
+                                                view.update_device_config(
+                                                    |config| config.banner_pools.heal = value,
+                                                    cx,
+                                                );
+                                            });
+                                        }
+                                    },
+                                ),
+                            ),
+                            SettingItem::new(
+                                bongocat_i18n::text(
+                                    language.catalog_locale(),
+                                    "settings.device_screen.banner.pools.fun",
+                                ),
+                                SettingField::switch(
+                                    {
+                                        let view = view_entity.clone();
+                                        move |app| view.read(app).device_config().banner_pools.fun
+                                    },
+                                    {
+                                        let view = view_entity.clone();
+                                        move |value: bool, app: &mut App| {
+                                            view.update(app, |view, cx| {
+                                                view.update_device_config(
+                                                    |config| config.banner_pools.fun = value,
+                                                    cx,
+                                                );
+                                            });
+                                        }
+                                    },
+                                ),
+                            ),
+                            SettingItem::new(
+                                bongocat_i18n::text(
+                                    language.catalog_locale(),
+                                    "settings.device_screen.banner.pools.poem",
+                                ),
+                                SettingField::switch(
+                                    {
+                                        let view = view_entity.clone();
+                                        move |app| {
+                                            view.read(app).device_config().banner_pools.poem
+                                        }
+                                    },
+                                    {
+                                        let view = view_entity.clone();
+                                        move |value: bool, app: &mut App| {
+                                            view.update(app, |view, cx| {
+                                                view.update_device_config(
+                                                    |config| config.banner_pools.poem = value,
+                                                    cx,
+                                                );
+                                            });
+                                        }
+                                    },
+                                ),
+                            ),
+                            SettingItem::new(
+                                bongocat_i18n::text(
+                                    language.catalog_locale(),
+                                    "settings.device_screen.banner.pools.moe",
+                                ),
+                                SettingField::switch(
+                                    {
+                                        let view = view_entity.clone();
+                                        move |app| view.read(app).device_config().banner_pools.moe
+                                    },
+                                    {
+                                        let view = view_entity.clone();
+                                        move |value: bool, app: &mut App| {
+                                            view.update(app, |view, cx| {
+                                                view.update_device_config(
+                                                    |config| config.banner_pools.moe = value,
+                                                    cx,
+                                                );
+                                            });
+                                        }
+                                    },
+                                ),
+                            ),
+                            SettingItem::new(
+                                bongocat_i18n::text(
+                                    language.catalog_locale(),
+                                    "settings.device_screen.banner.pools.time",
+                                ),
+                                SettingField::switch(
+                                    {
+                                        let view = view_entity.clone();
+                                        move |app| {
+                                            view.read(app).device_config().banner_pools.time
+                                        }
+                                    },
+                                    {
+                                        let view = view_entity.clone();
+                                        move |value: bool, app: &mut App| {
+                                            view.update(app, |view, cx| {
+                                                view.update_device_config(
+                                                    |config| config.banner_pools.time = value,
+                                                    cx,
+                                                );
+                                            });
+                                        }
+                                    },
+                                ),
+                            ),
+                            SettingItem::new(
+                                bongocat_i18n::text(
+                                    language.catalog_locale(),
+                                    "settings.device_screen.banner.custom.label",
+                                ),
+                                SettingField::input(
+                                    {
+                                        let view = view_entity.clone();
+                                        move |app| {
+                                            SharedString::from(
+                                                view.read(app).device_config().banner_custom.clone(),
+                                            )
+                                        }
+                                    },
+                                    {
+                                        let view = view_entity.clone();
+                                        move |value: SharedString, app: &mut App| {
+                                            let text = value.to_string();
+                                            view.update(app, |view, cx| {
+                                                view.update_device_config(
+                                                    |config| config.banner_custom = text,
+                                                    cx,
+                                                );
+                                            });
+                                        }
+                                    },
+                                ),
+                            ),
                         ]),
                     SettingGroup::new()
                         .title(bongocat_i18n::text(

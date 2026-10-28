@@ -442,7 +442,7 @@
       "banner": {
         "label": "標語",
         "random": {
-          "label": "隨機正能量標語"
+          "label": "隨機標語"
         },
         "size": {
           "label": "標語字級"
@@ -462,6 +462,37 @@
           "auto": "自動",
           "one": "一行",
           "two": "兩行"
+        },
+        "style": {
+          "label": "標語樣式",
+          "plain": "經典文字",
+          "pill": "膠囊徽章",
+          "two-tone": "雙色點睛",
+          "paws": "爪印點綴",
+          "low": "低位小字",
+          "fade": "半透明",
+          "bubble": "說話氣泡",
+          "rainbow": "彩虹字",
+          "wave": "波浪跳動",
+          "kaomoji": "顏文字",
+          "jelly": "果凍膠囊",
+          "brass": "黃銅銘牌",
+          "wood": "木質銘牌",
+          "enamel": "白瓷牌",
+          "pink-sweet": "粉色甜心牌",
+          "black-gold": "黑金石牌",
+          "tag": "掛牌"
+        },
+        "pools": {
+          "label": "隨機句子池",
+          "heal": "治癒打氣",
+          "fun": "冷幽默",
+          "poem": "詩意短句",
+          "moe": "奶味喵句",
+          "time": "按時段"
+        },
+        "custom": {
+          "label": "自訂句子（用；隔開）"
         }
       },
       "preview": {

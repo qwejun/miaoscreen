@@ -350,6 +350,12 @@ pub struct OverlayLine {
     /// padding, so a panel built before it existed reads zero and behaves as it
     /// always did.
     pub rows: Rows,
+    /// How the panel should dress this line. Travels in the halfword that used
+    /// to be padding, so a panel built before it existed reads zero and draws
+    /// the line as plain text. The codes are the panel's `STYLE_*` constants:
+    /// plates, bubbles and the rest are panel-side drawing, and only the choice
+    /// travels.
+    pub style: u16,
 }
 
 /// The strip drawn against the bottom edge of the panel.
@@ -411,6 +417,7 @@ impl Overlay {
                     font: Font::Rounded,
                     center_y: 58.0,
                     rows: Rows::One,
+                    style: 0,
                 },
                 OverlayLine {
                     text: "{MM}-{dd} {W}".to_owned(),
@@ -421,6 +428,7 @@ impl Overlay {
                     font: Font::Rounded,
                     center_y: 88.0,
                     rows: Rows::One,
+                    style: 0,
                 },
                 // Alone at the bottom, in the middle of the black the picture
                 // leaves rather than on its last row: sitting further up puts
@@ -438,6 +446,7 @@ impl Overlay {
                     font: Font::Rounded,
                     center_y: 712.0,
                     rows: Rows::Auto,
+                    style: 0,
                 },
             ],
         }
@@ -462,7 +471,7 @@ pub fn overlay(config: &Overlay) -> Vec<u8> {
         writer.u8(font_code(line.font));
         writer.u8(rows_code(line.rows));
         writer.u16(line.size_px);
-        writer.u16(0);
+        writer.u16(line.style);
         writer.u32(line.color);
         writer.f32(line.center_y);
         let bytes = line.text.as_bytes();
