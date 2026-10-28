@@ -19,6 +19,16 @@ signing/*.keystore
 # Live2D Cubism Core 为 Live2D 专有许可，不入库；获取方式见 README
 desktop/vendor/cubism/
 
+# 第三方皮肤（Awesome-BongoCat 合集，62 个约 640MB）。
+# 体积是仓库本身的三百倍，而它们每字节都是不可编译的模型数据，进历史只会让
+# clone 变成一次 640MB 的下载。跑 scripts/fetch-skins.py 在本地重建。
+# 白名单必须带目录尾斜杠：排除 `models/*` 会连目录本身一起排除，
+# 那样 `!` 就无法再包含目录里的文件。
+/desktop/resources/models/*/
+!/desktop/resources/models/standard/
+!/desktop/resources/models/keyboard/
+!/desktop/resources/models/gamepad/
+
 # 本地汇总的发布产物（走 GitHub Releases，不进历史）
 /dist/
 

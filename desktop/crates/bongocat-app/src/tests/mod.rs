@@ -278,6 +278,23 @@ fn installed_catalog_ids(application: &Application) -> Vec<String> {
         .collect()
 }
 
+/// The preset ids in the order the Model library page shows them.
+///
+/// The build ships the three input modes plus every third-party skin, and the
+/// count changes whenever the collection grows, so a test that pins the whole
+/// preset half breaks for a reason that is not about what it checks. Reading
+/// the half on its own lets a test talk about the order and about imports
+/// landing after it without also asserting how many skins exist.
+fn preset_catalog_ids(application: &Application) -> Vec<String> {
+    application
+        .model_catalog()
+        .expect("model catalog")
+        .into_iter()
+        .filter(|entry| entry.origin() == bongocat_model::ModelOrigin::Preset)
+        .map(|entry| entry.id().as_str().to_owned())
+        .collect()
+}
+
 /// Every catalog id in the order the Model library page shows them.
 fn catalog_ids(application: &Application) -> Vec<String> {
     application

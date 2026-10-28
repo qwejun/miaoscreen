@@ -50,6 +50,30 @@ patches/     对 desktop 的改动备份与说明
 对本项目没有意义，界面已经删掉，其中「桌面窗口」那一页换成了「圆屏」页。
 相对上游的完整改动记录在 `patches/CHANGES-vs-upstream.md`。
 
+## 皮肤
+
+模型库里除了自带的「标准 / 键盘 / 手柄」三只猫，还有 62 个来自
+[Awesome-BongoCat](https://github.com/ayangweb/Awesome-BongoCat) 的第三方皮肤，
+共 55 个角色（阮梅三模式齐全，另有几个角色带键盘或手柄版本）。
+
+这些目录体积合计 640MB，**不随仓库分发**——它们让 clone 变成一次 640MB 的下载，
+而这 640MB 全是不可编译的模型数据。仓库里的 `.gitignore` 保留三个自带模型，
+跳过其余目录；本地重建：
+
+```bash
+python scripts/fetch-skins.py          # 下载 + 解压到 desktop/resources/models/
+python scripts/fetch-skins.py --list   # 只打印 id/标题/模式表，不下载
+```
+
+脚本从合集仓库取中文包，按字节大小与英文包配对来确定 ASCII id（合集把同一份
+模型发布了中英两套，逐字节相同）。目录名就是模型 id，只允许 `[A-Za-z0-9._-]`，
+所以中文名放在 `desktop/crates/bongocat-app/src/model_listing.rs` 的
+`PRESET_MODELS` 表里作为显示名。加新皮肤要同时改脚本能产出的那张表，`--list`
+打印的就是可以直接粘贴的格式，两者由测试钉住一致。
+
+各个皮肤的版权归原作者，模型与角色形象的权利归其各自权利人（多为游戏厂商）。
+本仓库只做分发渠道，使用时请遵守原作者的授权条件。
+
 ## 运行
 
 ```powershell

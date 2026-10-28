@@ -6,6 +6,7 @@
 use super::*;
 
 use super::error_mapping::*;
+use crate::model_listing::preset_model_title;
 
 pub(super) const fn settings_import_progress(
     progress: ModelImportProgress,
@@ -91,12 +92,17 @@ pub(super) fn settings_model_entry(
     let id = entry.id().as_str().to_owned();
     let model_origin = entry.origin();
     let origin = settings_origin_from_model(model_origin);
-    // The title is user-editable metadata; a model that was never renamed —
-    // which is every preset the user has not customised — displays the stable
-    // id instead of inventing a name.
+    // The title is user-editable metadata; a model that was never renamed falls
+    // back to the name the build knows it by, and only then to the id. An
+    // imported model has no name of record until its import writes one, so its
+    // id is the honest answer.
     let title = application
         .recorded_model_title(model_origin, &id)
         .map(str::to_owned)
+        .or_else(|| match model_origin {
+            ModelOrigin::Preset => preset_model_title(&id).map(str::to_owned),
+            ModelOrigin::Installed => None,
+        })
         .unwrap_or_else(|| id.clone());
     let input_mode = application
         .model_input_mode(model_origin, &id)

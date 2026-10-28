@@ -320,8 +320,8 @@ fn service_renames_and_covers_a_model_of_either_origin() {
         .find(|entry| entry.id == preset.id && entry.origin == preset.origin)
         .expect("preset entry");
     assert_eq!(
-        bundled_entry.title, "standard",
-        "a preset that was never renamed is named by the id the build gave it"
+        bundled_entry.title, "标准模式",
+        "a preset that was never renamed is named by the build's own table"
     );
     assert_eq!(bundled_entry.cover, Some(bundled_cover.clone()));
 

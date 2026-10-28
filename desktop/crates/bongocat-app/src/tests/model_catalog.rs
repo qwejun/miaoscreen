@@ -151,46 +151,56 @@ fn model_catalog_lists_presets_in_mode_order_then_installed_models_in_import_ord
         Application::start_with_layout(layout.clone()).expect("start application");
     let source = repository_root().join("shared/fixtures/model-fixtures/cases/非 ASCII 模型");
 
+    // The build ships the three modes and then a shelf of third-party skins, so
+    // this pins the order at the front of the preset half rather than its
+    // length: adding a skin to the collection must not need this test edited.
+    let presets = preset_catalog_ids(&application);
     assert_eq!(
-        catalog_ids(&application),
+        presets
+            .iter()
+            .take(3)
+            .map(String::as_str)
+            .collect::<Vec<_>>(),
         vec!["standard", "keyboard", "gamepad"],
-        "the presets are the three modes, in mode order"
+        "the three modes come first, in mode order"
     );
 
     let first = import_one(&mut application, "第一只猫", source.clone());
     let second = import_one(&mut application, "第二只猫", source);
     let imported = vec![
-        "standard".to_owned(),
-        "keyboard".to_owned(),
-        "gamepad".to_owned(),
         first.id().as_str().to_owned(),
         second.id().as_str().to_owned(),
     ];
     assert_eq!(
-        catalog_ids(&application),
+        installed_catalog_ids(&application),
         imported,
         "each import joins the end of the page, after every preset"
+    );
+    assert_eq!(
+        preset_catalog_ids(&application),
+        presets,
+        "importing a model does not reorder the presets above it"
     );
     application.shutdown().expect("clean shutdown");
 
     let mut restarted = Application::start_with_layout(layout).expect("restart the application");
     assert_eq!(
-        catalog_ids(&restarted),
+        installed_catalog_ids(&restarted),
         imported,
         "the order is configuration, not the order one run happened to build"
+    );
+    assert_eq!(
+        preset_catalog_ids(&restarted),
+        presets,
+        "a restart rebuilds the same preset order"
     );
 
     restarted
         .delete_model(ModelOrigin::Installed, first.id().as_str())
         .expect("delete the first import");
     assert_eq!(
-        catalog_ids(&restarted),
-        vec![
-            "standard".to_owned(),
-            "keyboard".to_owned(),
-            "gamepad".to_owned(),
-            second.id().as_str().to_owned(),
-        ],
+        installed_catalog_ids(&restarted),
+        vec![second.id().as_str().to_owned()],
         "removing an import leaves the rest in place"
     );
     restarted.shutdown().expect("clean shutdown");
@@ -215,11 +225,8 @@ fn hand_copied_model_lands_after_the_imports_in_id_order() {
     seed_installed_model(&layout.models, "zz-copied-by-hand");
     seed_installed_model(&layout.models, "aa-copied-by-hand");
     assert_eq!(
-        catalog_ids(&application),
+        installed_catalog_ids(&application),
         vec![
-            "standard".to_owned(),
-            "keyboard".to_owned(),
-            "gamepad".to_owned(),
             imported.id().as_str().to_owned(),
             "aa-copied-by-hand".to_owned(),
             "zz-copied-by-hand".to_owned(),
