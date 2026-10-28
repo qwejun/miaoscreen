@@ -194,6 +194,18 @@ impl MagneoSink {
         self.shared.is_connected()
     }
 
+    /// The address the connected panel arrived from, as the socket sees it.
+    ///
+    /// This is the only honest answer to "how is the panel attached". The path
+    /// a person selected in settings describes what was *attempted*; a panel
+    /// that found this machine by itself over the network is on the network no
+    /// matter what that setting says, and a `127.0.0.1` peer means the debug
+    /// bridge's reverse tunnel carried it, because nothing else can put a
+    /// loopback peer on a listener bound to every interface.
+    pub fn peer_address(&self) -> Option<SocketAddr> {
+        self.shared.peer_address()
+    }
+
     /// A cloneable handle for the settings window, which outlives the sink's
     /// trip into the render loop as a `FrameSink` trait object.
     pub fn handle(&self) -> MagneoHandle {
@@ -254,6 +266,11 @@ impl MagneoHandle {
     pub fn is_connected(&self) -> bool {
         self.shared.is_connected()
     }
+
+    /// Where the connected panel arrived from. See [`MagneoSink::peer_address`].
+    pub fn peer_address(&self) -> Option<SocketAddr> {
+        self.shared.peer_address()
+    }
 }
 
 impl FrameSink for MagneoSink {
@@ -297,6 +314,9 @@ struct ConnectedGuard(Arc<Shared>);
 impl Drop for ConnectedGuard {
     fn drop(&mut self) {
         self.0.connected.store(false, Ordering::Relaxed);
+        // Cleared together with the flag: a page that reads "connected" and then
+        // asks where from must not get the previous panel's address.
+        self.0.set_peer(None);
     }
 }
 
@@ -312,6 +332,10 @@ struct Shared {
     /// the slot lock: the worker holds that lock across every wake-up and a page
     /// repaint must never wait on a blocked write to a slow panel.
     connected: AtomicBool,
+    /// The address the current panel connected from, or `None` when no panel is
+    /// on the socket. Written once per connection and held behind its own lock
+    /// for the same reason as `connected`.
+    peer: Mutex<Option<SocketAddr>>,
 }
 
 #[derive(Default)]
@@ -445,6 +469,20 @@ impl Shared {
 
     fn is_connected(&self) -> bool {
         self.connected.load(Ordering::Relaxed)
+    }
+
+    fn set_peer(&self, peer: Option<SocketAddr>) {
+        *self
+            .peer
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = peer;
+    }
+
+    fn peer_address(&self) -> Option<SocketAddr> {
+        *self
+            .peer
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
     }
 
     fn relink_revision(&self) -> u64 {
@@ -723,8 +761,8 @@ fn datagram_worker(link: Arc<UdpLink>, shared: Arc<Shared>) {
 fn worker(listener: TcpListener, shared: Arc<Shared>) {
     while !shared.is_closed() {
         match listener.accept() {
-            Ok((stream, _peer)) => {
-                if serve(stream, &shared) {
+            Ok((stream, peer)) => {
+                if serve(stream, peer, &shared) {
                     return;
                 }
             }
@@ -735,7 +773,7 @@ fn worker(listener: TcpListener, shared: Arc<Shared>) {
 }
 
 /// Serve one client until it disconnects. `true` means the sink was dropped.
-fn serve(mut stream: TcpStream, shared: &Arc<Shared>) -> bool {
+fn serve(mut stream: TcpStream, peer: SocketAddr, shared: &Arc<Shared>) -> bool {
     // The listener is non-blocking so the worker can be shut down, but that mode
     // is inherited by the accepted socket: a non-blocking write reports
     // `WouldBlock` the moment the send buffer is full, which is every frame or
@@ -750,6 +788,9 @@ fn serve(mut stream: TcpStream, shared: &Arc<Shared>) -> bool {
     if stream.write_all(&protocol::hello(0)).is_err() {
         return false;
     }
+    // Peer first: a page that reads the flag and then asks where from must
+    // never see "connected" with no address behind it.
+    shared.set_peer(Some(peer));
     shared.connected.store(true, Ordering::Relaxed);
     let _connected = ConnectedGuard(Arc::clone(shared));
 

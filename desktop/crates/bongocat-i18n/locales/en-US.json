@@ -417,6 +417,8 @@
         "no_cable": "No USB device detected",
         "tunnel_failed": "Could not open the USB tunnel",
         "retry": "Check again",
+        "via_wireless": "Wi-Fi",
+        "via_wired": "USB",
         "launch_failed": "Could not start the panel over USB"
       },
       "address": {

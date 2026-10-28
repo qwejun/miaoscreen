@@ -86,7 +86,7 @@ use model_mver_dialog::build_mver_mode_dialog;
 mod models;
 mod navigation;
 pub use device_page::{
-    DeviceLink, DeviceLinkMode, DeviceLinkProblem, DeviceLinkState, DeviceOverlayConfig,
+    DeviceLink, DeviceLinkMode, DeviceLinkProblem, DeviceLinkState, DeviceOverlayConfig, LiveLink,
     device_page_index, install_device_link,
 };
 pub use navigation::SettingsNavigationMemory;
@@ -357,6 +357,10 @@ pub struct SettingsView {
     pub(crate) device_preview_page: bool,
     /// Whether a panel is connected, as of the last look at the link.
     pub(crate) device_link_state: DeviceLinkState,
+    /// The road the connected panel actually took, as of the same look. `None`
+    /// while nothing is attached, which is what lets the page tell "selected
+    /// cable, arriving over Wi-Fi" apart from "on the cable".
+    pub(crate) device_live_link: Option<LiveLink>,
     /// Whether the page is currently watching the link.
     pub(crate) device_status_ticker: bool,
     /// Whether the watch loop is already running for this window.

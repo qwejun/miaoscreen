@@ -417,6 +417,8 @@
         "no_cable": "Nenhum dispositivo USB detectado",
         "tunnel_failed": "Não foi possível abrir o túnel USB",
         "retry": "Verificar de novo",
+        "via_wireless": "Wi-Fi",
+        "via_wired": "USB",
         "launch_failed": "Não foi possível iniciar o painel por USB"
       },
       "address": {

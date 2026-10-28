@@ -417,6 +417,8 @@
         "no_cable": "未偵測到 USB 裝置",
         "tunnel_failed": "USB 連接埠轉送失敗",
         "retry": "重新偵測",
+        "via_wireless": "Wi-Fi",
+        "via_wired": "USB",
         "launch_failed": "無法透過 USB 啟動圓屏"
       },
       "address": {

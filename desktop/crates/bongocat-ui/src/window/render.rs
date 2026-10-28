@@ -418,7 +418,13 @@ impl Render for SettingsView {
                                         move |options: &RenderOptions,
                                               _: &mut Window,
                                               app: &mut App| {
-                                            let state = view.read(app).device_link_state;
+                                            let (state, live) = {
+                                                let view = view.read(app);
+                                                (
+                                                    view.device_link_state,
+                                                    view.device_live_link.clone(),
+                                                )
+                                            };
                                             let locale = language.catalog_locale();
                                             let (text, color) = match state {
                                                 DeviceLinkState::Connected => (
@@ -470,6 +476,35 @@ impl Render for SettingsView {
                                                         .text_color(color)
                                                         .child(text),
                                                 );
+                                            // How this connection actually arrived,
+                                            // which is not always what the dropdown
+                                            // above says. A panel that found this
+                                            // machine by itself over the network is on
+                                            // the network even while the setting still
+                                            // says "cable", and the setting is a
+                                            // preference, not a measurement.
+                                            if let Some(live) = live {
+                                                let key = match live.mode {
+                                                    DeviceLinkMode::Wireless => {
+                                                        "settings.device_screen.state.via_wireless"
+                                                    }
+                                                    DeviceLinkMode::Wired => {
+                                                        "settings.device_screen.state.via_wired"
+                                                    }
+                                                };
+                                                row = row.child(
+                                                    div()
+                                                        .px_2()
+                                                        .py_0p5()
+                                                        .rounded_md()
+                                                        .bg(app.theme().secondary)
+                                                        .text_xs()
+                                                        .text_color(
+                                                            app.theme().muted_foreground,
+                                                        )
+                                                        .child(bongocat_i18n::text(locale, key)),
+                                                );
+                                            }
                                             // The link checks itself on its own clock,
                                             // but the person reading this line has
                                             // usually just touched the cable and
@@ -501,13 +536,27 @@ impl Render for SettingsView {
                                         "settings.device_screen.address.label",
                                     ),
                                     SettingField::element({
-                                        let address = device_address.clone();
+                                        let view = view_entity.clone();
+                                        let expected = device_address.clone();
                                         move |_: &RenderOptions, _: &mut Window, app: &mut App| {
+                                            // With a panel attached this shows both
+                                            // ends of the connection that exists;
+                                            // with none it shows the address a panel
+                                            // would be expected on, so the row is
+                                            // never blank and never claims a
+                                            // connection that is not there.
+                                            let live = view.read(app).device_live_link.clone();
+                                            let text = match live {
+                                                Some(live) => {
+                                                    format!("{} → {}", live.peer, live.local)
+                                                }
+                                                None => expected.clone(),
+                                            };
                                             div()
                                                 .font_family("monospace")
                                                 .text_sm()
                                                 .text_color(app.theme().muted_foreground)
-                                                .child(address.clone())
+                                                .child(text)
                                                 .into_any_element()
                                         }
                                     }),

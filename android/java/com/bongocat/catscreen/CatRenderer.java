@@ -2,8 +2,11 @@ package com.bongocat.catscreen;
 
 import android.graphics.Bitmap;
 import android.graphics.Canvas;
+import android.graphics.Color;
+import android.graphics.LinearGradient;
 import android.graphics.Paint;
 import android.graphics.PorterDuff;
+import android.graphics.Shader;
 import android.graphics.Typeface;
 import android.opengl.GLES20;
 import android.opengl.GLSurfaceView;
@@ -158,7 +161,13 @@ public final class CatRenderer implements GLSurfaceView.Renderer {
             + "varying vec2 vUv;\n"
             + "uniform sampler2D uModelTex;\n"
             + "void main() {\n"
-            + "    gl_FragColor = texture2D(uModelTex, vUv);\n"
+            + "    vec4 c = texture2D(uModelTex, vUv);\n"
+            // The strip is rasterised by Canvas, which writes straight alpha,
+            // and it is blended with premultiplied factors. Multiplying here is
+            // what makes a fade actually fade: without it the half-transparent
+            // rows of the gradient are added at full strength and the top edge
+            // glows white instead of dissolving into the picture.
+            + "    gl_FragColor = vec4(c.rgb * c.a, c.a);\n"
             + "}\n";
 
     private static final short[] QUAD_INDICES = {0, 1, 2, 0, 2, 3};
@@ -267,6 +276,17 @@ public final class CatRenderer implements GLSurfaceView.Renderer {
     /** Inset for left- and right-aligned strip text. */
     private static final int BAND_TEXT_MARGIN_PX = 24;
     private static final int BAND_DIVIDER_COLOR = 0x33FFFFFF;
+    /**
+     * How much of the strip's height is spent dissolving into the picture.
+     *
+     * <p>The strip is tall enough to start inside the artwork, so drawing it as
+     * a solid bar would cut the desk off with a straight line. The top share of
+     * it fades from fully transparent to the strip's own background instead,
+     * and the clock sits at the end of that fade — the number reads as
+     * something the desk is sinking into rather than as a label stuck under the
+     * picture.
+     */
+    private static final float BAND_FADE_SHARE = 0.40f;
 
     /** The decorative Chinese face the panel's firmware ships. */
     private static final String ROUNDED_FONT_PATH = "/system/fonts/FZLanTYJW-Regular.otf";
@@ -736,7 +756,26 @@ public final class CatRenderer implements GLSurfaceView.Renderer {
         if (!changed) {
             return false;
         }
-        bandCanvas.drawColor(strip.background, PorterDuff.Mode.SRC);
+        // Cleared to transparent, not filled: the top of the strip has to let
+        // the picture through, and `Mode.SRC` with the background colour would
+        // paint it solid before the fade is drawn over it.
+        bandCanvas.drawColor(Color.TRANSPARENT, PorterDuff.Mode.CLEAR);
+        int fadeHeight = Math.round(bandHeight * BAND_FADE_SHARE);
+        if (fadeHeight > 0) {
+            // Same colour at both ends, only the alpha moves: the fade has to
+            // land on exactly the background underneath it, or the seam shows.
+            LinearGradient fade = new LinearGradient(
+                    0f, 0f, 0f, fadeHeight,
+                    strip.background & 0x00FFFFFF, strip.background,
+                    Shader.TileMode.CLAMP);
+            bandPaint.setShader(fade);
+            bandPaint.setStyle(Paint.Style.FILL);
+            bandCanvas.drawRect(0f, 0f, bandWidth, fadeHeight, bandPaint);
+            bandPaint.setShader(null);
+        }
+        bandPaint.setColor(strip.background);
+        bandPaint.setStyle(Paint.Style.FILL);
+        bandCanvas.drawRect(0f, fadeHeight, bandWidth, bandHeight, bandPaint);
         if (strip.divider) {
             bandPaint.setColor(BAND_DIVIDER_COLOR);
             bandPaint.setTextAlign(Paint.Align.LEFT);
@@ -749,6 +788,11 @@ public final class CatRenderer implements GLSurfaceView.Renderer {
             bandPaint.setTextSize(line.sizePx);
             bandPaint.setColor(line.color);
             bandPaint.setAntiAlias(true);
+            // A soft drop shadow, because the text now sits partly over the
+            // faded part of the strip rather than on flat black. It costs one
+            // extra blit per line on a bitmap this size, and it is what keeps
+            // the clock legible where the desk shows through behind it.
+            bandPaint.setShadowLayer(3f, 0f, 2f, 0x99000000);
             bandPaint.setTextAlign(paintAlign(line.align));
             // Vertical centring by hand: the baseline that puts the glyph box's
             // centre on the line's own centre.

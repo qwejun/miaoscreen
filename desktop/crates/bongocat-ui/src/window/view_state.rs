@@ -413,6 +413,7 @@ impl SettingsView {
             device_preview_pending: false,
             device_preview_page: false,
             device_link_state: super::DeviceLinkState::Waiting,
+            device_live_link: None,
             device_status_ticker: false,
             device_status_running: false,
             window_hidden: true,

@@ -417,6 +417,8 @@
         "no_cable": "لم يتم اكتشاف جهاز USB",
         "tunnel_failed": "تعذّر فتح نفق USB",
         "retry": "تحقق مرة أخرى",
+        "via_wireless": "Wi-Fi",
+        "via_wired": "USB",
         "launch_failed": "تعذّر تشغيل الشاشة عبر USB"
       },
       "address": {

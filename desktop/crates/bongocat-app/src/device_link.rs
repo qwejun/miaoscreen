@@ -17,7 +17,7 @@ use bongocat_audio::MotionAudioSink;
 use bongocat_magneo::protocol::Overlay;
 use bongocat_magneo::MagneoHandle;
 use bongocat_ui::{
-    DeviceLink, DeviceLinkMode, DeviceLinkProblem, DeviceLinkState, DeviceOverlayConfig,
+    DeviceLink, DeviceLinkMode, DeviceLinkProblem, DeviceLinkState, DeviceOverlayConfig, LiveLink,
 };
 use gpui_kit::App;
 use serde::{Deserialize, Serialize};
@@ -41,8 +41,12 @@ const CABLE_LAUNCH_INTERVAL: Duration = Duration::from_secs(30);
 /// that was already about to reconnect.
 const CABLE_PANEL_GRACE: Duration = Duration::from_secs(8);
 
-/// The publisher as the model's audio destination.
-///
+/// The strip layout this build writes: band height and line positions as of the
+/// fade. Bumped when the geometry changes so an older file can be told apart
+/// from one a person tuned by hand.
+const STRIP_LAYOUT: u32 = 1;
+
+/// The publisher as the model's audio destination.///
 /// The panel has the speaker the user is looking at, so the clips travel with the
 /// model and the play command travels as an index. Nothing is decoded on this
 /// side: the file bytes go over the wire as they are and the panel's own player
@@ -88,6 +92,11 @@ struct StoredConfig {
     banner: Option<String>,
     /// `wireless` or `wired`. Absent means the network, which needs no cable.
     link: Option<String>,
+    /// Layout revision of the strip. Absent means the file was written before
+    /// the strip gained its fade, whose band was shorter and whose text was
+    /// smaller; that file is upgraded on read rather than left with a geometry
+    /// the panel no longer draws.
+    strip_layout: Option<u32>,
     /// Where `adb` lives when it is not on the PATH. Kept in the file because
     /// the alternative is asking a person to set an environment variable for a
     /// program they double-click.
@@ -97,9 +106,19 @@ struct StoredConfig {
 impl StoredConfig {
     fn into_config(self) -> DeviceOverlayConfig {
         let defaults = DeviceOverlayConfig::default();
+        // A file without a layout revision carries 160 only because that was
+        // the default when it was written — the person did not pick it. The
+        // height is replaced so the strip reaches up over the picture and the
+        // panel can fade it in; every other height is a choice and is kept.
+        let legacy = self.strip_layout.is_none();
+        let band_px = match self.band_px {
+            Some(160) if legacy => defaults.band_px,
+            Some(px) => px,
+            None => defaults.band_px,
+        };
         DeviceOverlayConfig {
             enabled: self.enabled.unwrap_or(defaults.enabled),
-            band_px: self.band_px.unwrap_or(defaults.band_px),
+            band_px,
             clock: self.clock.unwrap_or(defaults.clock),
             date: self.date.unwrap_or(defaults.date),
             banner: self.banner.unwrap_or(defaults.banner),
@@ -114,6 +133,7 @@ impl StoredConfig {
             date: Some(config.date.clone()),
             banner: Some(config.banner.clone()),
             link: None,
+            strip_layout: Some(STRIP_LAYOUT),
             adb: None,
         }
     }
@@ -398,6 +418,34 @@ impl DeviceLink for ProductDeviceLink {
             DeviceLinkMode::Wired => format!("127.0.0.1:{}", self.port),
             DeviceLinkMode::Wireless => self.wireless_address(),
         }
+    }
+
+    fn live(&self) -> Option<LiveLink> {
+        let peer = self.handle.peer_address()?;
+        // The road is read off the peer, not off the setting. A listener bound
+        // to every interface can only be reached on loopback by something
+        // inside this machine, and the one thing that does that is the debug
+        // bridge's reverse tunnel — so a loopback peer is the cable even when
+        // the setting says network, and a routable peer is the network even
+        // when the setting says cable.
+        let mode = if peer.ip().is_loopback() {
+            DeviceLinkMode::Wired
+        } else {
+            DeviceLinkMode::Wireless
+        };
+        let local = match mode {
+            DeviceLinkMode::Wired => format!("127.0.0.1:{}", self.port),
+            // The panel reached a LAN address, and the routing table's answer is
+            // the one it reached unless this machine has several networks — in
+            // which case the socket's own local address would be the better
+            // answer but is not what `peer` carries.
+            DeviceLinkMode::Wireless => self.wireless_address(),
+        };
+        Some(LiveLink {
+            mode,
+            peer: peer.ip().to_string(),
+            local,
+        })
     }
 
     fn mode(&self) -> DeviceLinkMode {

@@ -417,6 +417,8 @@
         "no_cable": "Aucun appareil USB détecté",
         "tunnel_failed": "Impossible d'ouvrir le tunnel USB",
         "retry": "Vérifier à nouveau",
+        "via_wireless": "Wi-Fi",
+        "via_wired": "USB",
         "launch_failed": "Impossible de démarrer l'écran via USB"
       },
       "address": {

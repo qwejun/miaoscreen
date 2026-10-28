@@ -129,3 +129,21 @@ inherits = "release"
 strip = "none"
 debug = "full"
 lto = false
+
+# For the loop where a change is measured in seconds, not in frame times.
+#
+# `release` is tuned for the binary that ships: fat LTO over 990 dependencies
+# and a single codegen unit, which costs minutes even when one constant moved.
+# That is the right default for a build a person downloads and wrong for the
+# tenth rebuild of an afternoon. This profile keeps the optimiser and gives up
+# the link-time tuning instead — a few percent slower at runtime, several times
+# faster to produce.
+#
+#   cargo build --profile fast -p bongocat-app
+#
+# The output lands in `target/fast/`, so it never disturbs the release cache.
+[profile.fast]
+inherits = "release"
+lto = "thin"
+codegen-units = 16
+incremental = true

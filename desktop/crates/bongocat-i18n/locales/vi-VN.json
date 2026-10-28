@@ -417,6 +417,8 @@
         "no_cable": "Không phát hiện thiết bị USB",
         "tunnel_failed": "Không mở được đường hầm USB",
         "retry": "Kiểm tra lại",
+        "via_wireless": "Wi-Fi",
+        "via_wired": "USB",
         "launch_failed": "Không khởi động được màn hình qua USB"
       },
       "address": {

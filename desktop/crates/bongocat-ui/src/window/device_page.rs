@@ -56,7 +56,10 @@ impl Default for DeviceOverlayConfig {
     fn default() -> Self {
         Self {
             enabled: true,
-            band_px: 160,
+            // Matches `Overlay::default_strip`: tall enough to cover the bottom
+            // of the picture so the panel can fade it in rather than butt a
+            // black bar against the artwork.
+            band_px: 180,
             clock: "{HH}:{mm}".to_owned(),
             date: "{yyyy}-{MM}-{dd} {W}".to_owned(),
             banner: "今天也要加油".to_owned(),
@@ -132,6 +135,28 @@ pub enum DeviceLinkState {
     Unavailable(DeviceLinkProblem),
 }
 
+/// How the panel that is on the socket right now actually got here.
+///
+/// Deliberately a different thing from [`DeviceLinkMode`]. That one is what the
+/// person selected, and it describes what the product is trying to arrange.
+/// This one is what the socket reports, and it is the only answer that stays
+/// true when the panel finds this machine on its own: the setting can say
+/// "cable" for days while the panel is dialling the LAN address, and a page
+/// that repeats the setting back as if it were a measurement is how "connected
+/// over Wi-Fi" ends up displayed as `127.0.0.1` with a USB label next to it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct LiveLink {
+    /// Which path the connection came in on.
+    pub mode: DeviceLinkMode,
+    /// The address the panel's connection arrived from — the panel's own
+    /// address on whatever network carried it.
+    pub peer: String,
+    /// The address on this machine the panel reached. Together with `peer` this
+    /// is the whole story of the connection, and it is also what tells a person
+    /// which of this machine's interfaces the panel can see it on.
+    pub local: String,
+}
+
 /// What the page needs from whoever owns the link to the panel.
 ///
 /// This crate does not depend on the publisher: the trait is the whole surface
@@ -141,6 +166,13 @@ pub trait DeviceLink: Send + Sync + 'static {
     fn address(&self) -> String;
     /// Which path the panel is expected on.
     fn mode(&self) -> DeviceLinkMode;
+    /// How the panel that is connected right now got here, if one is.
+    ///
+    /// Read separately from [`Self::state`] because it answers a different
+    /// question: the state says whether a panel is on the socket, this says by
+    /// which road — and the two are updated from the same snapshot so the page
+    /// never shows a path that belongs to the previous connection.
+    fn live(&self) -> Option<LiveLink>;
     /// Switches paths and pushes the new address to the panel.
     fn set_mode(&self, mode: DeviceLinkMode);
     /// Runs the cable checks again, off the caller's thread.
@@ -276,6 +308,7 @@ impl SettingsView {
         self.device_status_ticker = true;
         if let Some(link) = device_link(cx) {
             self.device_link_state = link.state();
+            self.device_live_link = link.live();
         }
         if self.device_status_running {
             return;
@@ -309,8 +342,14 @@ impl SettingsView {
             return false;
         };
         let state = link.state();
-        if state != self.device_link_state {
+        let live = link.live();
+        // Both are compared, because the road a panel took can change while the
+        // verdict stays the same: the panel can drop the cable and come back
+        // over the network, and that moves the address on screen with no change
+        // to "connected".
+        if state != self.device_link_state || live != self.device_live_link {
             self.device_link_state = state;
+            self.device_live_link = live;
             cx.notify();
         }
         true

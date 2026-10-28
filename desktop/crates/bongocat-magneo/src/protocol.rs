@@ -320,42 +320,50 @@ impl Overlay {
     /// The strip a publisher shows when nobody configured one: a large clock,
     /// the date under it and the user's banner at the bottom.
     ///
-    /// The band lives in the black the 1.72:1 canvas leaves below the picture,
-    /// so the line positions only have to look right inside 160 pixels. Colour
-    /// values are `0xAARRGGBB` ints because that is exactly what an Android
-    /// `Color` int is, so the device can feed them straight to a `Paint`.
+    /// The line positions are relative to the top of the band, and the band is
+    /// deliberately taller than the black the 1.72:1 canvas leaves below the
+    /// picture: the panel fades the upper part of it into the artwork, so the
+    /// clock has to sit below that fade. Colour values are `0xAARRGGBB` ints
+    /// because that is exactly what an Android `Color` int is, so the device can
+    /// feed them straight to a `Paint`.
     pub fn default_strip() -> Overlay {
         Overlay {
-            band_px: 160,
+            // Tall enough to reach up over the bottom of the picture, which is
+            // what lets the panel fade it in instead of butting a black bar
+            // against the artwork. The panel only pushes the picture up by the
+            // part of this that would cover it, and at this height that is a
+            // few pixels — the strip reads as the desk falling into shadow
+            // rather than as a separate band.
+            band_px: 180,
             background: 0xFF00_0000,
             divider: false,
             lines: vec![
                 OverlayLine {
                     text: "{HH}:{mm}".to_owned(),
-                    size_px: 44,
+                    size_px: 50,
                     color: 0xFFFF_FFFF,
                     align: Align::Center,
                     weight: Weight::Bold,
                     font: Font::Mono,
-                    center_y: 46.0,
+                    center_y: 62.0,
                 },
                 OverlayLine {
                     text: "{yyyy}-{MM}-{dd} {W}".to_owned(),
-                    size_px: 18,
+                    size_px: 15,
                     color: 0xFF9A_A0A6,
                     align: Align::Center,
                     weight: Weight::Regular,
                     font: Font::System,
-                    center_y: 92.0,
+                    center_y: 110.0,
                 },
                 OverlayLine {
                     text: "今天也要加油".to_owned(),
-                    size_px: 22,
+                    size_px: 18,
                     color: 0xFFE8_EAED,
                     align: Align::Center,
                     weight: Weight::Regular,
                     font: Font::Rounded,
-                    center_y: 124.0,
+                    center_y: 150.0,
                 },
             ],
         }

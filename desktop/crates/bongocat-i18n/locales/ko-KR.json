@@ -417,6 +417,8 @@
         "no_cable": "USB 장치를 찾지 못했습니다",
         "tunnel_failed": "USB 포트 전달에 실패했습니다",
         "retry": "다시 확인",
+        "via_wireless": "Wi-Fi",
+        "via_wired": "USB",
         "launch_failed": "USB로 화면을 시작하지 못했습니다"
       },
       "address": {
