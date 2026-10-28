@@ -1,18 +1,19 @@
 #!/usr/bin/env python3
-"""Build the release archives: the application itself, and the optional skins.
+"""Build the release archive: the application, the apk and the checksums.
 
-Two downloads, because the skins are 640 MB and nearly all of it is model data
-that only some people want: the main archive stays around 15 MB and carries the
-three models the product ships, and the skin pack adds the rest.
+The third-party skins are deliberately not part of this. They are 483MB
+compressed, they are not in the repository, and they are not published — the
+release carries the three models the product ships and nothing else, so a
+version bump does not mean re-uploading half a gigabyte. `--skins` builds a
+pack for local use, mirroring the install layout so it can be extracted over
+the application directory.
 
-    python scripts/pack-release.py                 # both archives
-    python scripts/pack-release.py --main          # application only
-    python scripts/pack-release.py --skins         # skins only
+    python scripts/pack-release.py            # application + apk + checksums
+    python scripts/pack-release.py --skins    # also pack the local skins
 
-The main archive unpacks to ``MiaoScreen-<version>-windows-x64/`` and the skin
-archive mirrors the install layout (``resources/models/<id>/``) so it can be
-extracted over that directory. Inputs are the release build and the model tree;
-run ``scripts/fetch-skins.py`` first if the skins are missing.
+The application archive unpacks to ``MiaoScreen-<version>-windows-x64/``. The
+skins come from the model tree; run ``scripts/fetch-skins.py`` first if they
+are missing.
 """
 
 from __future__ import annotations
@@ -145,16 +146,16 @@ def write_checksums(paths: list[pathlib.Path], release: str) -> pathlib.Path:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument('--main', action='store_true', help='pack the application archive')
-    parser.add_argument('--skins', action='store_true', help='pack the skin archive')
+    parser.add_argument(
+        '--skins',
+        action='store_true',
+        help='also pack the local third-party skins (not published)',
+    )
     options = parser.parse_args()
-    both = not options.main and not options.skins
 
     release = version()
-    produced = []
-    if both or options.main:
-        produced.append(pack_main(release))
-    if both or options.skins:
+    produced = [pack_main(release)]
+    if options.skins:
         produced.append(pack_skins(release))
 
     apk = ROOT / 'android' / 'build' / 'CatScreen.apk'
