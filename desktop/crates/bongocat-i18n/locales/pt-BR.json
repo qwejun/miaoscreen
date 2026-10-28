@@ -413,7 +413,7 @@
         "connected": "Conectado",
         "waiting": "Aguardando o painel",
         "adb_missing": "adb não encontrado — a conexão por cabo não está disponível",
-        "usb_not_ready": "USB conectado, mas não pronto — reconecte o cabo",
+        "usb_not_ready": "O serviço de depuração da tela não responde — desligue e religue a depuração USB na tela",
         "no_cable": "Nenhum dispositivo USB detectado",
         "tunnel_failed": "Não foi possível abrir o túnel USB",
         "retry": "Verificar de novo",

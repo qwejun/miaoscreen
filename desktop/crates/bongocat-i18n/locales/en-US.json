@@ -413,7 +413,7 @@
         "connected": "Connected",
         "waiting": "Waiting for the panel",
         "adb_missing": "adb not found — the cable path is unavailable",
-        "usb_not_ready": "USB connected but not ready — replug the cable",
+        "usb_not_ready": "The panel's debug service is not answering — turn USB debugging off and on again on the panel",
         "no_cable": "No USB device detected",
         "tunnel_failed": "Could not open the USB tunnel",
         "retry": "Check again",

@@ -413,7 +413,7 @@
         "connected": "연결됨",
         "waiting": "화면 연결 대기 중",
         "adb_missing": "adb를 찾을 수 없어 유선 연결을 쓸 수 없습니다",
-        "usb_not_ready": "USB는 연결됐지만 준비되지 않음 — 케이블을 다시 꽂으세요",
+        "usb_not_ready": "화면의 디버그 서비스가 응답하지 않음 — 화면에서 USB 디버깅을 껐다 켜세요",
         "no_cable": "USB 장치를 찾지 못했습니다",
         "tunnel_failed": "USB 포트 전달에 실패했습니다",
         "retry": "다시 확인",

@@ -274,7 +274,7 @@ dependencies = [
 
 [[package]]
 name = "bongocat-audio"
-version = "2.3.1"
+version = "0.1.4"
 dependencies = [
  "rodio",
  "thiserror 2.0.21",
@@ -282,7 +282,7 @@ dependencies = [
 
 [[package]]
 name = "bongocat-config"
-version = "2.3.1"
+version = "0.1.4"
 dependencies = [
  "bongocat-input",
  "bongocat-storage",
@@ -294,7 +294,7 @@ dependencies = [
 
 [[package]]
 name = "bongocat-input"
-version = "2.3.1"
+version = "0.1.4"
 dependencies = [
  "schemars",
  "serde",
@@ -303,7 +303,7 @@ dependencies = [
 
 [[package]]
 name = "bongocat-live2d"
-version = "2.3.1"
+version = "0.1.4"
 dependencies = [
  "bongocat-live2d-playback",
  "bongocat-live2d-render",
@@ -317,7 +317,7 @@ dependencies = [
 
 [[package]]
 name = "bongocat-live2d-playback"
-version = "2.3.1"
+version = "0.1.4"
 dependencies = [
  "serde",
  "serde_json",
@@ -326,7 +326,7 @@ dependencies = [
 
 [[package]]
 name = "bongocat-live2d-render"
-version = "2.3.1"
+version = "0.1.4"
 dependencies = [
  "bongocat-model",
  "bongocat-render",
@@ -336,7 +336,7 @@ dependencies = [
 
 [[package]]
 name = "bongocat-log"
-version = "2.3.1"
+version = "0.1.4"
 dependencies = [
  "bongocat-storage",
  "time",
@@ -344,7 +344,7 @@ dependencies = [
 
 [[package]]
 name = "bongocat-model"
-version = "2.3.1"
+version = "0.1.4"
 dependencies = [
  "serde",
  "serde_json",
@@ -353,7 +353,7 @@ dependencies = [
 
 [[package]]
 name = "bongocat-platform"
-version = "2.3.1"
+version = "0.1.4"
 dependencies = [
  "arboard",
  "async-io",
@@ -385,7 +385,7 @@ dependencies = [
 
 [[package]]
 name = "bongocat-render"
-version = "2.3.1"
+version = "0.1.4"
 dependencies = [
  "bongocat-input",
  "thiserror 2.0.21",
@@ -393,7 +393,7 @@ dependencies = [
 
 [[package]]
 name = "bongocat-runtime"
-version = "2.3.1"
+version = "0.1.4"
 dependencies = [
  "bongocat-audio",
  "bongocat-input",
@@ -407,7 +407,7 @@ dependencies = [
 
 [[package]]
 name = "bongocat-storage"
-version = "2.3.1"
+version = "0.1.4"
 dependencies = [
  "atomic-write-file",
 ]
@@ -1227,7 +1227,7 @@ dependencies = [
 
 [[package]]
 name = "miaoscreen"
-version = "0.1.0"
+version = "0.1.4"
 dependencies = [
  "bongocat-input",
  "bongocat-live2d-render",

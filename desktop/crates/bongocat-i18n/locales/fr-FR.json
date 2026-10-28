@@ -413,7 +413,7 @@
         "connected": "Connecté",
         "waiting": "En attente de l'écran",
         "adb_missing": "adb introuvable — la liaison filaire est indisponible",
-        "usb_not_ready": "USB connecté mais pas prêt — rebranchez le câble",
+        "usb_not_ready": "Le service de débogage de l'écran ne répond pas — désactivez puis réactivez le débogage USB sur l'écran",
         "no_cable": "Aucun appareil USB détecté",
         "tunnel_failed": "Impossible d'ouvrir le tunnel USB",
         "retry": "Vérifier à nouveau",

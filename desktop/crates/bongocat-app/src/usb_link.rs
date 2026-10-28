@@ -167,17 +167,27 @@ pub(crate) fn prepare(adb: &Path, port: u16) -> Result<(), DeviceLinkProblem> {
 }
 
 /// How often a wedged transport may be reset before the answer is "replug it".
-const RECONNECT_INTERVAL: Duration = Duration::from_secs(10);
+///
+/// A handshake that has been dropped takes seconds to redo, and the link check
+/// runs every four. Anything much below a minute therefore lands while the
+/// previous attempt is still settling, and the transport never gets the quiet
+/// window it needs to come back.
+const RECONNECT_INTERVAL: Duration = Duration::from_secs(60);
 
 static LAST_NUDGE: std::sync::Mutex<Option<Instant>> = std::sync::Mutex::new(None);
 
 /// Asks `adb` to reopen the transport of a device it can see but cannot talk to.
 ///
-/// Two levers, cheapest first. A transport reset is what replugging the cable
-/// does, and it keeps the debug server — and anything tunneled through it —
-/// alive. A server that has latched onto a dead transport will not let go of it
-/// though, and restarting it costs only the tunnel this machine can reopen by
-/// itself, so that is the second lever rather than a thing for the person to do.
+/// One lever only. `adb reconnect` drops this side's USB handle and opens it
+/// again, which is what replugging the cable does; if the debug daemon on the
+/// device is alive but wedged, that is enough.
+///
+/// Restarting the server used to be the second lever, and it is the wrong one:
+/// `kill-server` only tears down this machine's half of the connection. It
+/// cannot wake a daemon that has already exited — nothing on this side can —
+/// and each restart throws away a handshake that had not finished yet. With the
+/// check running every four seconds and the restart every ten, a device that
+/// was merely slow to answer never got far enough to answer at all.
 fn nudge_transport(adb: &Path) {
     let Ok(mut last) = LAST_NUDGE.lock() else {
         return;
@@ -186,15 +196,10 @@ fn nudge_transport(adb: &Path) {
         return;
     }
     *last = Some(Instant::now());
-    // Released before the subprocesses run: a second caller must not queue
-    // behind a `kill-server` that takes a second to settle.
+    // Released before the subprocess runs: a second caller must not queue
+    // behind an `adb` invocation that takes a second to settle.
     drop(last);
     let _ = run(adb, &["reconnect", "offline"]);
-    if serial(adb).is_ok() {
-        return;
-    }
-    let _ = run(adb, &["kill-server"]);
-    let _ = run(adb, &["start-server"]);
 }
 
 /// Starts the panel's app with `address`, or moves the running one to it.
