@@ -443,7 +443,20 @@
         "label": "Banner text",
         "random": {
           "label": "Random encouragement"
-      }
+        },
+        "size": {
+          "label": "Banner size"
+        },
+        "font": {
+          "label": "Banner font",
+          "kuaile": "Cartoon",
+          "butter": "Heavy round",
+          "hand": "Brush",
+          "xiaowei": "Light serif",
+          "rounded": "Rounded",
+          "system": "System",
+          "mono": "Monospace"
+        }
       },
       "preview": {
         "title": "Preview",

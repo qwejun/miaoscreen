@@ -443,7 +443,20 @@
         "label": "Texto do banner",
         "random": {
           "label": "Encorajamento aleatório"
-      }
+        },
+        "size": {
+          "label": "Tamanho do banner"
+        },
+        "font": {
+          "label": "Fonte do banner",
+          "kuaile": "Cartoon",
+          "butter": "Arredondada grossa",
+          "hand": "Pincel",
+          "xiaowei": "Serifada leve",
+          "rounded": "Arredondada",
+          "system": "Sistema",
+          "mono": "Monoespaçada"
+        }
       },
       "preview": {
         "title": "Prévia",

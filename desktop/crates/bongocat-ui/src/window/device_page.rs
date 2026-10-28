@@ -42,6 +42,56 @@ const PREVIEW_ATTEMPTS: usize = 14;
 /// the publisher has already left, and the read is a single atomic load.
 const STATUS_POLL: Duration = Duration::from_millis(1000);
 
+/// Which of the panel's faces the banner is written in.
+///
+/// Three, because the panel firmware ships three: its decorative Chinese face,
+/// the system sans-serif, and a monospace. Anything else would have to be
+/// installed on the device, and the page has no way to offer that.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum BannerFont {
+    /// 站酷快乐体 — a chunky cartoon face, the closest match to the artwork.
+    Kuaile,
+    /// 站酷庆科黄油体 — heavy and rounded, with more weight than the cartoon.
+    Butter,
+    /// 马善政手写体 — brush writing, for a line that reads as a note.
+    Hand,
+    /// 站酷小薇体 — a light serif, quiet next to the others.
+    XiaoWei,
+    /// The rounded Chinese face the panel's firmware ships.
+    Rounded,
+    /// The panel's own sans-serif.
+    System,
+    /// Fixed-width, for anyone who wants the line to read as a readout.
+    Mono,
+}
+
+impl BannerFont {
+    pub fn id(self) -> &'static str {
+        match self {
+            Self::Kuaile => "kuaile",
+            Self::Butter => "butter",
+            Self::Hand => "hand",
+            Self::XiaoWei => "xiaowei",
+            Self::Rounded => "rounded",
+            Self::System => "system",
+            Self::Mono => "mono",
+        }
+    }
+
+    pub fn from_id(id: &str) -> Option<Self> {
+        match id {
+            "kuaile" => Some(Self::Kuaile),
+            "butter" => Some(Self::Butter),
+            "hand" => Some(Self::Hand),
+            "xiaowei" => Some(Self::XiaoWei),
+            "rounded" => Some(Self::Rounded),
+            "system" => Some(Self::System),
+            "mono" => Some(Self::Mono),
+            _ => None,
+        }
+    }
+}
+
 /// The strip settings the page edits.
 #[derive(Clone, Debug, PartialEq)]
 pub struct DeviceOverlayConfig {
@@ -56,6 +106,9 @@ pub struct DeviceOverlayConfig {
     /// travel as the same string. Keeping the two apart here means switching
     /// back does not lose whatever the person typed.
     pub banner_random: bool,
+    /// Point size of the banner on the panel.
+    pub banner_size: u16,
+    pub banner_font: BannerFont,
 }
 
 impl Default for DeviceOverlayConfig {
@@ -72,6 +125,8 @@ impl Default for DeviceOverlayConfig {
             date: "{MM}-{dd} {W}".to_owned(),
             banner: "今天也要加油".to_owned(),
             banner_random: false,
+            banner_size: 30,
+            banner_font: BannerFont::Kuaile,
         }
     }
 }

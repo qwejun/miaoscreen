@@ -403,6 +403,38 @@ public final class CatRenderer implements GLSurfaceView.Renderer {
     /** GL-thread-only cache of fonts loaded from the panel's own filesystem. */
     private static final Map<String, Typeface> TYPEFACE_CACHE = new HashMap<>();
 
+    /**
+     * The faces bundled with this app, handed over by the activity.
+     *
+     * <p>The panel's own fonts are a rounded Chinese face and a sans-serif, and
+     * neither matches artwork of a cat at a keyboard. These travel in the APK,
+     * so they look the same on every unit regardless of what the vendor put in
+     * `/system/fonts`. Not loaded here: `Typeface.createFromAsset` reads the
+     * whole file, and the GL thread has no time for it.
+     */
+    private Typeface[] bundledTypefaces;
+
+    /** The same order the host's `Font::Bundled(n)` indexes into. */
+    private static final String[] BUNDLED_FACE_ASSETS = {
+            "fonts/ZCOOLKuaiLe-Regular.ttf",
+            "fonts/ZCOOLQingKeHuangYou-Regular.ttf",
+            "fonts/MaShanZheng-Regular.ttf",
+            "fonts/ZCOOLXiaoWei-Regular.ttf",
+    };
+
+    /** Loads the bundled faces; a missing file leaves that slot empty. */
+    static Typeface[] loadBundledTypefaces(android.content.res.AssetManager assets) {
+        Typeface[] faces = new Typeface[BUNDLED_FACE_ASSETS.length];
+        for (int i = 0; i < BUNDLED_FACE_ASSETS.length; i++) {
+            try {
+                faces[i] = Typeface.createFromAsset(assets, BUNDLED_FACE_ASSETS[i]);
+            } catch (RuntimeException error) {
+                Log.w(TAG, "no bundled face at " + BUNDLED_FACE_ASSETS[i]);
+            }
+        }
+        return faces;
+    }
+
     public CatRenderer(PublisherClient client) {
         this.client = client;
     }
@@ -420,6 +452,11 @@ public final class CatRenderer implements GLSurfaceView.Renderer {
     /** Adds a key to every incoming frame; `-1` disables it. See `fake_key`. */
     void setForcedKey(int assetId) {
         this.forcedKeyId = assetId;
+    }
+
+    /** The bundled playful faces; `null` falls back to the panel's default. */
+    void setBundledTypefaces(Typeface[] faces) {
+        this.bundledTypefaces = faces;
     }
 
     @Override
@@ -1119,6 +1156,18 @@ public final class CatRenderer implements GLSurfaceView.Renderer {
     private Typeface typefaceFor(Overlay.Line line) {
         boolean bold = line.weight == Overlay.WEIGHT_BOLD;
         int style = bold ? Typeface.BOLD : Typeface.NORMAL;
+        if (line.font >= Overlay.FONT_BUNDLED) {
+            int index = line.font - Overlay.FONT_BUNDLED;
+            Typeface face = bundledTypefaces != null && index < bundledTypefaces.length
+                    ? bundledTypefaces[index]
+                    : null;
+            // An index this build does not carry is a host that is newer than
+            // the app, which is the normal case right after an update.
+            if (face != null) {
+                return face;
+            }
+            return Typeface.create(Typeface.SANS_SERIF, style);
+        }
         switch (line.font) {
             case Overlay.FONT_ROUNDED: {
                 String path = bold ? ROUNDED_BOLD_FONT_PATH : ROUNDED_FONT_PATH;

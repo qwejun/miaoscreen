@@ -265,6 +265,13 @@ pub enum Font {
     System,
     Rounded,
     Mono,
+    /// One of the faces the panel's app carries, by index into its own list.
+    ///
+    /// Part of the protocol rather than a free-form name because the set is
+    /// fixed: they are APK assets, not fonts a person can install on the
+    /// device. An index the panel does not have falls back to its sans-serif,
+    /// which is what lets an older app read a newer host.
+    Bundled(u8),
 }
 
 const fn align_code(align: Align) -> u8 {
@@ -291,6 +298,9 @@ const fn font_code(font: Font) -> u8 {
         Font::System => 0,
         Font::Rounded => 1,
         Font::Mono => 2,
+        // Appended, like the card alignment: a panel that predates the bundled
+        // faces reads 3 and up as its default arm and draws the strip anyway.
+        Font::Bundled(index) => 3u8.saturating_add(index),
     }
 }
 

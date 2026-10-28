@@ -443,7 +443,20 @@
         "label": "Texte du bandeau",
         "random": {
           "label": "Encouragement aléatoire"
-      }
+        },
+        "size": {
+          "label": "Taille du bandeau"
+        },
+        "font": {
+          "label": "Police du bandeau",
+          "kuaile": "Cartoon",
+          "butter": "Ronde grasse",
+          "hand": "Pinceau",
+          "xiaowei": "Serif léger",
+          "rounded": "Arrondie",
+          "system": "Système",
+          "mono": "Chasse fixe"
+        }
       },
       "preview": {
         "title": "Aperçu",

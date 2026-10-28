@@ -443,7 +443,20 @@
         "label": "標語",
         "random": {
           "label": "隨機正能量標語"
-      }
+        },
+        "size": {
+          "label": "標語字級"
+        },
+        "font": {
+          "label": "標語字體",
+          "kuaile": "快樂體",
+          "butter": "黃油體",
+          "hand": "手寫體",
+          "xiaowei": "小薇體",
+          "rounded": "圓體",
+          "system": "系統",
+          "mono": "等寬"
+        }
       },
       "preview": {
         "title": "預覽",

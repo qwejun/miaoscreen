@@ -83,6 +83,11 @@ public final class MainActivity extends Activity {
         surface.setEGLContextClientVersion(2);
         surface.setEGLConfigChooser(8, 8, 8, 8, 16, 0);
         CatRenderer renderer = new CatRenderer(client);
+        // Parsed here rather than on the GL thread: each face is up to 3MB and
+        // `createFromAsset` reads the whole file, which is not time the renderer
+        // has to spare. A missing face is not fatal — that slot falls back to
+        // the panel's sans-serif.
+        renderer.setBundledTypefaces(CatRenderer.loadBundledTypefaces(getAssets()));
         surface.setRenderer(renderer);
         surface.setRenderMode(GLSurfaceView.RENDERMODE_CONTINUOUSLY);
         renderer.setDebugSwitches(

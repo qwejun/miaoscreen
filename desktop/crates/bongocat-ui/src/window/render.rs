@@ -644,6 +644,122 @@ impl Render for SettingsView {
                                     },
                                 ),
                             ),
+                            SettingItem::new(
+                                bongocat_i18n::text(
+                                    language.catalog_locale(),
+                                    "settings.device_screen.banner.size.label",
+                                ),
+                                SettingField::number_input(
+                                    NumberFieldOptions {
+                                        min: 16.0,
+                                        // Past this the longest line the list
+                                        // holds starts to reach the bezel on
+                                        // the row it sits at.
+                                        max: 44.0,
+                                        step: 2.0,
+                                    },
+                                    {
+                                        let view = view_entity.clone();
+                                        move |app| {
+                                            f64::from(
+                                                view.read(app).device_config().banner_size,
+                                            )
+                                        }
+                                    },
+                                    {
+                                        let view = view_entity.clone();
+                                        move |value: f64, app: &mut App| {
+                                            let size = value.round().clamp(16.0, 44.0) as u16;
+                                            view.update(app, |view, cx| {
+                                                view.update_device_config(
+                                                    |config| config.banner_size = size,
+                                                    cx,
+                                                );
+                                            });
+                                        }
+                                    },
+                                ),
+                            ),
+                            SettingItem::new(
+                                bongocat_i18n::text(
+                                    language.catalog_locale(),
+                                    "settings.device_screen.banner.font.label",
+                                ),
+                                SettingField::dropdown(
+                                    vec![
+                                        (
+                                            SharedString::from(BannerFont::Kuaile.id()),
+                                            SharedString::from(bongocat_i18n::text(
+                                                language.catalog_locale(),
+                                                "settings.device_screen.banner.font.kuaile",
+                                            )),
+                                        ),
+                                        (
+                                            SharedString::from(BannerFont::Butter.id()),
+                                            SharedString::from(bongocat_i18n::text(
+                                                language.catalog_locale(),
+                                                "settings.device_screen.banner.font.butter",
+                                            )),
+                                        ),
+                                        (
+                                            SharedString::from(BannerFont::Hand.id()),
+                                            SharedString::from(bongocat_i18n::text(
+                                                language.catalog_locale(),
+                                                "settings.device_screen.banner.font.hand",
+                                            )),
+                                        ),
+                                        (
+                                            SharedString::from(BannerFont::XiaoWei.id()),
+                                            SharedString::from(bongocat_i18n::text(
+                                                language.catalog_locale(),
+                                                "settings.device_screen.banner.font.xiaowei",
+                                            )),
+                                        ),
+                                        (
+                                            SharedString::from(BannerFont::Rounded.id()),
+                                            SharedString::from(bongocat_i18n::text(
+                                                language.catalog_locale(),
+                                                "settings.device_screen.banner.font.rounded",
+                                            )),
+                                        ),
+                                        (
+                                            SharedString::from(BannerFont::System.id()),
+                                            SharedString::from(bongocat_i18n::text(
+                                                language.catalog_locale(),
+                                                "settings.device_screen.banner.font.system",
+                                            )),
+                                        ),
+                                        (
+                                            SharedString::from(BannerFont::Mono.id()),
+                                            SharedString::from(bongocat_i18n::text(
+                                                language.catalog_locale(),
+                                                "settings.device_screen.banner.font.mono",
+                                            )),
+                                        ),
+                                    ],
+                                    {
+                                        let view = view_entity.clone();
+                                        move |app: &App| {
+                                            SharedString::from(
+                                                view.read(app).device_config().banner_font.id(),
+                                            )
+                                        }
+                                    },
+                                    {
+                                        let view = view_entity.clone();
+                                        move |value: SharedString, app: &mut App| {
+                                            let font = BannerFont::from_id(&value)
+                                                .unwrap_or(BannerFont::Rounded);
+                                            view.update(app, |view, cx| {
+                                                view.update_device_config(
+                                                    |config| config.banner_font = font,
+                                                    cx,
+                                                );
+                                            });
+                                        }
+                                    },
+                                ),
+                            ),
                         ]),
                     SettingGroup::new()
                         .title(bongocat_i18n::text(

@@ -443,7 +443,20 @@
         "label": "Nội dung khẩu hiệu",
         "random": {
           "label": "Lời cổ vũ ngẫu nhiên"
-      }
+        },
+        "size": {
+          "label": "Cỡ khẩu hiệu"
+        },
+        "font": {
+          "label": "Phông khẩu hiệu",
+          "kuaile": "Hoạt hình",
+          "butter": "Tròn đậm",
+          "hand": "Bút lông",
+          "xiaowei": "Serif nhẹ",
+          "rounded": "Bo tròn",
+          "system": "Hệ thống",
+          "mono": "Đơn cách"
+        }
       },
       "preview": {
         "title": "Xem trước",

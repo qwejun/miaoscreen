@@ -37,6 +37,12 @@ final class Overlay {
     static final int FONT_SYSTEM = 0;
     static final int FONT_ROUNDED = 1;
     static final int FONT_MONO = 2;
+    /**
+     * The first font code that names a face this app carries rather than one
+     * the firmware ships. `FONT_BUNDLED + n` is the n-th entry of the
+     * renderer's list, which is why the two orders have to stay in step.
+     */
+    static final int FONT_BUNDLED = 3;
 
     /** One row of text inside the strip. */
     static final class Line {

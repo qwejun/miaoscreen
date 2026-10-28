@@ -14,10 +14,11 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use bongocat_audio::MotionAudioSink;
-use bongocat_magneo::protocol::Overlay;
+use bongocat_magneo::protocol::{Font, Overlay};
 use bongocat_magneo::MagneoHandle;
 use bongocat_ui::{
-    DeviceLink, DeviceLinkMode, DeviceLinkProblem, DeviceLinkState, DeviceOverlayConfig, LiveLink,
+    BannerFont, DeviceLink, DeviceLinkMode, DeviceLinkProblem, DeviceLinkState, DeviceOverlayConfig,
+    LiveLink,
 };
 use gpui_kit::App;
 use serde::{Deserialize, Serialize};
@@ -56,6 +57,14 @@ const STRIP_LAYOUT: u32 = 3;
 /// defaults.
 const PREVIOUS_DEFAULT_BANDS: [u32; 3] = [160, 200, 800];
 const LEGACY_DATE_TEMPLATE: &str = "{yyyy}-{MM}-{dd} {W}";
+
+/// The sizes the banner may be set to, in pixels on the panel.
+///
+/// Below the lower bound the line stops being legible from arm's length; above
+/// the upper one a six-character slogan runs into the chord at the height it
+/// sits at. Both ends are the panel's limits rather than a preference, so the
+/// page offers the range and the reader never has to guess.
+const BANNER_SIZE_RANGE: (u16, u16) = (16, 44);
 
 /// The publisher as the model's audio destination.
 ///
@@ -104,6 +113,10 @@ struct StoredConfig {
     banner: Option<String>,
     /// Whether the banner comes from the list rather than from `banner`.
     banner_random: Option<bool>,
+    /// Point size and face of the banner. Absent means the defaults this
+    /// program writes, which are the ones the layout was drawn around.
+    banner_size: Option<u16>,
+    banner_font: Option<String>,
     /// `wireless` or `wired`. Absent means the network, which needs no cable.
     link: Option<String>,
     /// Layout revision of the strip. Absent means the file was written before
@@ -146,6 +159,19 @@ impl StoredConfig {
             date,
             banner: self.banner.unwrap_or(defaults.banner),
             banner_random: self.banner_random.unwrap_or(defaults.banner_random),
+            // Out-of-range sizes from a hand-edited file are clamped rather
+            // than rejected: the strip is a decoration, and refusing to start
+            // over a number is worse than drawing it at the nearest size that
+            // fits the chord.
+            banner_size: self
+                .banner_size
+                .map(|size| size.clamp(BANNER_SIZE_RANGE.0, BANNER_SIZE_RANGE.1))
+                .unwrap_or(defaults.banner_size),
+            banner_font: self
+                .banner_font
+                .as_deref()
+                .and_then(BannerFont::from_id)
+                .unwrap_or(defaults.banner_font),
         }
     }
 
@@ -157,6 +183,8 @@ impl StoredConfig {
             date: Some(config.date.clone()),
             banner: Some(config.banner.clone()),
             banner_random: Some(config.banner_random),
+            banner_size: Some(config.banner_size),
+            banner_font: Some(config.banner_font.id().to_owned()),
             link: None,
             strip_layout: Some(STRIP_LAYOUT),
             adb: None,
@@ -584,6 +612,25 @@ fn overlay_for(config: &DeviceOverlayConfig) -> Overlay {
     let texts = [config.clock.clone(), config.date.clone(), banner];
     for (line, text) in strip.lines.iter_mut().zip(texts) {
         line.text = text;
+    }
+    // The banner is the one line a person is allowed to typograph, so its size
+    // and face travel with the text instead of being fixed here: the panel
+    // applies whatever arrives, and the card's own lines keep the type the
+    // layout was drawn around.
+    if let Some(line) = strip.lines.last_mut() {
+        line.size_px = config.banner_size;
+        // The four playful faces are numbered in the order the panel's app
+        // loads them; the three firmware faces keep the codes they have always
+        // had.
+        line.font = match config.banner_font {
+            BannerFont::Kuaile => Font::Bundled(0),
+            BannerFont::Butter => Font::Bundled(1),
+            BannerFont::Hand => Font::Bundled(2),
+            BannerFont::XiaoWei => Font::Bundled(3),
+            BannerFont::Rounded => Font::Rounded,
+            BannerFont::System => Font::System,
+            BannerFont::Mono => Font::Mono,
+        };
     }
     strip
 }

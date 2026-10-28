@@ -443,7 +443,20 @@
         "label": "배너 문구",
         "random": {
           "label": "무작위 응원 문구"
-      }
+        },
+        "size": {
+          "label": "배너 크기"
+        },
+        "font": {
+          "label": "배너 글꼴",
+          "kuaile": "카툰",
+          "butter": "라운드 헤비",
+          "hand": "붓글씨",
+          "xiaowei": "라이트 세리프",
+          "rounded": "둥근체",
+          "system": "시스템",
+          "mono": "고정폭"
+        }
       },
       "preview": {
         "title": "미리보기",

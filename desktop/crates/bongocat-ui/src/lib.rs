@@ -10,7 +10,8 @@ mod external_link;
 mod pop_confirm;
 mod window;
 pub use window::{
-    DeviceLink, DeviceLinkMode, DeviceLinkProblem, DeviceLinkState, DeviceOverlayConfig, LiveLink,
+    BannerFont, DeviceLink, DeviceLinkMode, DeviceLinkProblem, DeviceLinkState,
+    DeviceOverlayConfig, LiveLink,
     SettingsNavigationMemory, SettingsView, SettingsWindowHandle, SettingsWindowSeed,
     device_page_index, install_device_link, open_settings_window,
 };
