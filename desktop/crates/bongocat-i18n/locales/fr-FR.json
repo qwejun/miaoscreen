@@ -456,6 +456,12 @@
           "rounded": "Arrondie",
           "system": "Système",
           "mono": "Chasse fixe"
+        },
+        "rows": {
+          "label": "Lignes du bandeau",
+          "auto": "Auto",
+          "one": "Une ligne",
+          "two": "Deux lignes"
         }
       },
       "preview": {

@@ -296,6 +296,28 @@ public final class CatRenderer implements GLSurfaceView.Renderer {
      * picture.
      */
     private static final float BAND_FADE_SHARE = 0.40f;
+    /**
+     * Most rows one strip line may be broken into.
+     *
+     * <p>Three is where the bottom of an 800px panel runs out: the third row
+     * already sits 80px below the line's own centre, where the chord is down to
+     * 380px, and a fourth would be narrower than the words that need it. A
+     * line that still does not fit at three rows is drawn at three and clipped
+     * by the bezel, which is the honest failure — better than silently
+     * dropping the tail of what someone wrote.
+     */
+    private static final int MAX_TEXT_ROWS = 3;
+    /** Row pitch as a multiple of the text size. */
+    private static final float TEXT_LINE_HEIGHT_SHARE = 1.34f;
+    /**
+     * How full one row has to be before breaking it in two is an improvement.
+     *
+     * <p>Below this the line already reads as a line, and splitting it would
+     * pair two short fragments for no gain — a six-character greeting on two
+     * rows looks like a mistake. Measured as a share of the chord rather than
+     * as a character count so it holds at every point size.
+     */
+    private static final float TWO_ROW_FILL_SHARE = 0.62f;
 
     // ------------------------------------------------------------- clock card
     // A white note pinned inside the upper-left arc, holding the time and the
@@ -399,6 +421,8 @@ public final class CatRenderer implements GLSurfaceView.Renderer {
     private long bandSecond = -1;
     private final String[] bandRendered = new String[Overlay.MAX_LINES];
     private final String[] bandScratch = new String[Overlay.MAX_LINES];
+    /** Rows the line currently being drawn was broken into. */
+    private final String[] bandRows = new String[MAX_TEXT_ROWS];
     private final Calendar bandCalendar = Calendar.getInstance();
     /** GL-thread-only cache of fonts loaded from the panel's own filesystem. */
     private static final Map<String, Typeface> TYPEFACE_CACHE = new HashMap<>();
@@ -957,38 +981,258 @@ public final class CatRenderer implements GLSurfaceView.Renderer {
             Paint.FontMetrics metrics = bandPaint.getFontMetrics();
 
             float centerY;
-            float x;
             if (layer && line.align == Overlay.ALIGN_CARD) {
                 centerY = CARD_Y * scale + line.centerY * scale;
                 // Centred in the card, both lines: two strings of different
                 // widths sharing a left edge read as a table, and a table is
                 // not what a note looks like.
-                x = (CARD_X + CARD_WIDTH * 0.5f) * scale;
+                float x = (CARD_X + CARD_WIDTH * 0.5f) * scale;
                 bandPaint.setTextAlign(Paint.Align.CENTER);
                 // Ink on paper: a shadow here reads as a dirty smudge rather
                 // than as depth.
                 bandPaint.clearShadowLayer();
-            } else {
-                centerY = bandTop + line.centerY;
-                int align = line.align;
-                if (align == Overlay.ALIGN_CARD) {
-                    // No card, so the near-black chosen to sit on white would
-                    // vanish into the picture.
-                    align = Overlay.ALIGN_LEFT;
-                    bandPaint.setColor(CARD_TEXT_ON_ARTWORK);
-                }
-                bandPaint.setTextAlign(paintAlign(align));
-                x = paintX(align, centerY, bandRendered[i]);
+                // The card is a fixed box: whatever does not fit inside it is
+                // the host's problem, so these two lines are never broken.
+                bandCanvas.drawText(
+                        bandRendered[i],
+                        x,
+                        centerY - (metrics.ascent + metrics.descent) * 0.5f,
+                        bandPaint);
+                continue;
             }
-            // Vertical centring by hand: the baseline that puts the glyph box's
-            // centre on the line's own centre.
-            bandCanvas.drawText(
-                    bandRendered[i],
-                    x,
-                    centerY - (metrics.ascent + metrics.descent) * 0.5f,
-                    bandPaint);
+            centerY = bandTop + line.centerY;
+            int align = line.align;
+            if (align == Overlay.ALIGN_CARD) {
+                // No card, so the near-black chosen to sit on white would
+                // vanish into the picture.
+                align = Overlay.ALIGN_LEFT;
+                bandPaint.setColor(CARD_TEXT_ON_ARTWORK);
+            }
+            bandPaint.setTextAlign(paintAlign(align));
+            // The strip line is the only one that can be arbitrarily long, and
+            // it sits where the circle is already narrow, so it is the one that
+            // gets broken into rows instead of running under the bezel.
+            float rowHeight = line.sizePx * TEXT_LINE_HEIGHT_SHARE;
+            int rows = fitRows(bandRendered[i], line.rows, centerY, rowHeight);
+            float firstRowY = centerY - (rows - 1) * rowHeight * 0.5f;
+            for (int r = 0; r < rows; r++) {
+                String row = bandRows[r];
+                if (row.length() == 0) {
+                    continue;
+                }
+                // Each row is placed by its own height, because the chord it
+                // has to clear is a different width than the row above it.
+                float rowY = firstRowY + r * rowHeight;
+                // Vertical centring by hand: the baseline that puts the glyph
+                // box's centre on the row's own centre.
+                bandCanvas.drawText(
+                        row,
+                        paintX(align, rowY, row),
+                        rowY - (metrics.ascent + metrics.descent) * 0.5f,
+                        bandPaint);
+            }
         }
         return true;
+    }
+
+    /**
+     * Breaks one strip line into rows that each fit the chord at their own
+     * height.
+     *
+     * <p>A round panel narrows as it descends, so a long banner cannot be split
+     * into equal rows: the lower a row sits, the less width it has. The fit is
+     * tried with one row first, then two, then three, and every trial cuts each
+     * row against the circle where that row will actually be. One row
+     * reproduces the old single-line placement exactly, so nothing that already
+     * fitted moves by a pixel.
+     *
+     * <p>{@code preference} is what the host asked for. One row is honoured
+     * even when the text does not fit — the bezel then clips it, which is the
+     * honest reading of "keep it on one line". Two rows are laid out only if
+     * both halves fit; a sentence that needs more falls back to breaking by
+     * width rather than being drawn under the bezel.
+     *
+     * <p>Returns the number of rows and leaves their text in {@link #bandRows}.
+     * The rows are returned in reading order and the whole block stays centred
+     * on the line's own centre line.
+     */
+    private int fitRows(String text, int preference, float centerY, float rowHeight) {
+        if (preference == Overlay.ROWS_ONE) {
+            bandRows[0] = text;
+            clearRows(1);
+            return 1;
+        }
+        if (preference == Overlay.ROWS_TWO) {
+            float available = chordWidthAt(centerY) - 2f * BAND_TEXT_EDGE_PADDING_PX;
+            // A line that already sits comfortably in one row is left alone:
+            // "two rows" is permission to break a long sentence, not an order
+            // to break every one.
+            if (bandPaint.measureText(text) <= available * TWO_ROW_FILL_SHARE) {
+                bandRows[0] = text;
+                clearRows(1);
+                return 1;
+            }
+            int split = splitIndex(text);
+            if (split > 0 && split < text.length()) {
+                String top = text.substring(0, split).trim();
+                String bottom = text.substring(split).trim();
+                if (fits(top, centerY - rowHeight * 0.5f)
+                        && fits(bottom, centerY + rowHeight * 0.5f)) {
+                    bandRows[0] = top;
+                    bandRows[1] = bottom;
+                    clearRows(2);
+                    return 2;
+                }
+            }
+        }
+        for (int rows = 1; rows <= MAX_TEXT_ROWS; rows++) {
+            float firstRowY = centerY - (rows - 1) * rowHeight * 0.5f;
+            int cursor = 0;
+            int filled = 0;
+            for (int r = 0; r < rows; r++) {
+                if (cursor >= text.length()) {
+                    break;
+                }
+                float room = chordWidthAt(firstRowY + r * rowHeight)
+                        - 2f * BAND_TEXT_EDGE_PADDING_PX;
+                int take = takeRow(text, cursor, room);
+                bandRows[r] = text.substring(cursor, cursor + take).trim();
+                // A cut that lands on a space leaves the space to the row that
+                // already had it; the next row must not start with one.
+                cursor += take;
+                while (cursor < text.length() && text.charAt(cursor) == ' ') {
+                    cursor++;
+                }
+                filled = r + 1;
+            }
+            if (cursor >= text.length() || rows == MAX_TEXT_ROWS) {
+                clearRows(filled);
+                return Math.max(1, filled);
+            }
+        }
+        return 1;
+    }
+
+    /** Empties the row slots from {@code from} on, so a stale row is never drawn. */
+    private void clearRows(int from) {
+        for (int r = Math.max(0, from); r < MAX_TEXT_ROWS; r++) {
+            bandRows[r] = "";
+        }
+    }
+
+    /** Whether {@code text} fits the chord at this height, with its inset. */
+    private boolean fits(String text, float screenY) {
+        return bandPaint.measureText(text) <= chordWidthAt(screenY)
+                - 2f * BAND_TEXT_EDGE_PADDING_PX;
+    }
+
+    /**
+     * Where to break a line into two halves.
+     *
+     * <p>Preference is a space or a punctuation mark, because a sentence broken
+     * there still reads as a sentence. Among those the one nearest the middle
+     * wins, so the two rows end up about the same length. A break that would
+     * leave one row under a third of the line is refused: at that point the
+     * middle of the text is the better guess, and an unbalanced pair reads as a
+     * mistake rather than as a pause.
+     *
+     * <p>Returns {@code 0} when the text is too short to be worth splitting.
+     */
+    private static int splitIndex(String text) {
+        int length = text.length();
+        if (length < 2) {
+            return 0;
+        }
+        int middle = length / 2;
+        int low = Math.max(1, length / 3);
+        int high = Math.min(length - 1, length - length / 3);
+        int best = -1;
+        int bestDistance = Integer.MAX_VALUE;
+        for (int i = low; i <= high; i++) {
+            if (!isBreakAfter(text.charAt(i - 1))) {
+                continue;
+            }
+            int distance = Math.abs(i - middle);
+            if (distance < bestDistance) {
+                bestDistance = distance;
+                best = i;
+            }
+        }
+        return best > 0 ? best : middle;
+    }
+
+    private static boolean isBreakAfter(char c) {
+        switch (c) {
+            case ' ':
+            case '\t':
+            case ',':
+            case '.':
+            case '!':
+            case '?':
+            case ';':
+            case ':':
+            case '，':
+            case '。':
+            case '、':
+            case '！':
+            case '？':
+            case '；':
+            case '：':
+            case '…':
+                return true;
+            default:
+                return false;
+        }
+    }
+
+    /**
+     * How many characters starting at {@code cursor} fit in {@code room}.
+     *
+     * <p>Always at least one: a row too narrow even for a single glyph still
+     * has to consume something, or the caller never advances. Latin words are
+     * kept whole when a space is reachable behind the cut, because a banner
+     * broken mid-word reads as a rendering bug rather than as a break.
+     */
+    private int takeRow(String text, int cursor, float room) {
+        int remaining = text.length() - cursor;
+        String tail = text.substring(cursor);
+        int take = (int) bandPaint.breakText(tail, true, room, null);
+        if (take <= 0) {
+            return 1;
+        }
+        if (take >= remaining) {
+            return remaining;
+        }
+        if (isLatinLetter(text.charAt(cursor + take - 1))
+                && isLatinLetter(text.charAt(cursor + take))) {
+            int back = cursor + take - 1;
+            while (back > cursor && text.charAt(back) != ' ') {
+                back--;
+            }
+            if (back > cursor) {
+                take = back - cursor;
+            }
+        }
+        return take;
+    }
+
+    private static boolean isLatinLetter(char c) {
+        return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || c == '\'';
+    }
+
+    /**
+     * Width of the circle's chord at a screen height.
+     *
+     * <p>Zero outside the circle, which is what makes a row pushed past the
+     * bezel collapse to a single character instead of drawing off the glass.
+     */
+    private float chordWidthAt(float screenY) {
+        float radius = Math.min(viewWidth, viewHeight) * 0.5f;
+        float dy = Math.abs(screenY - viewHeight * 0.5f);
+        if (dy >= radius) {
+            return 0f;
+        }
+        return 2f * (float) Math.sqrt(radius * radius - dy * dy);
     }
 
     /** Scales the card's 800px geometry to the surface actually on offer. */
@@ -1230,15 +1474,11 @@ public final class CatRenderer implements GLSurfaceView.Renderer {
         if (align == Overlay.ALIGN_CENTER) {
             return bandWidth * 0.5f;
         }
-        float radius = Math.min(viewWidth, viewHeight) * 0.5f;
         float centreX = viewWidth * 0.5f;
-        float centreY = viewHeight * 0.5f;
-        float dy = Math.abs(screenY - centreY);
-        float halfChord = dy >= radius ? 0f : (float) Math.sqrt(radius * radius - dy * dy);
         // Half the text plus a little air, so the glyphs clear the bezel rather
         // than the text box's origin clearing it.
         float inset = bandPaint.measureText(text) * 0.5f + BAND_TEXT_EDGE_PADDING_PX;
-        float edge = Math.max(0f, centreX - halfChord) + inset;
+        float edge = Math.max(0f, centreX - chordWidthAt(screenY) * 0.5f) + inset;
         if (edge > centreX) {
             // A row so close to the edge that even the inset does not fit: fall
             // back to the fixed margin rather than drawing outside the circle.

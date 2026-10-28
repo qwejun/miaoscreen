@@ -456,6 +456,12 @@
           "rounded": "둥근체",
           "system": "시스템",
           "mono": "고정폭"
+        },
+        "rows": {
+          "label": "배너 줄 수",
+          "auto": "자동",
+          "one": "한 줄",
+          "two": "두 줄"
         }
       },
       "preview": {

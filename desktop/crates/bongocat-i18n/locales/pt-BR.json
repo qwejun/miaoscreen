@@ -456,6 +456,12 @@
           "rounded": "Arredondada",
           "system": "Sistema",
           "mono": "Monoespaçada"
+        },
+        "rows": {
+          "label": "Linhas do banner",
+          "auto": "Automático",
+          "one": "Uma linha",
+          "two": "Duas linhas"
         }
       },
       "preview": {

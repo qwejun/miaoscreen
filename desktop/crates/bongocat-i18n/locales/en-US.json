@@ -456,6 +456,12 @@
           "rounded": "Rounded",
           "system": "System",
           "mono": "Monospace"
+        },
+        "rows": {
+          "label": "Banner lines",
+          "auto": "Auto",
+          "one": "One line",
+          "two": "Two lines"
         }
       },
       "preview": {

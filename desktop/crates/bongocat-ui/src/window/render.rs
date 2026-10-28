@@ -760,6 +760,58 @@ impl Render for SettingsView {
                                     },
                                 ),
                             ),
+                            SettingItem::new(
+                                bongocat_i18n::text(
+                                    language.catalog_locale(),
+                                    "settings.device_screen.banner.rows.label",
+                                ),
+                                SettingField::dropdown(
+                                    vec![
+                                        (
+                                            SharedString::from(BannerRows::Auto.id()),
+                                            SharedString::from(bongocat_i18n::text(
+                                                language.catalog_locale(),
+                                                "settings.device_screen.banner.rows.auto",
+                                            )),
+                                        ),
+                                        (
+                                            SharedString::from(BannerRows::One.id()),
+                                            SharedString::from(bongocat_i18n::text(
+                                                language.catalog_locale(),
+                                                "settings.device_screen.banner.rows.one",
+                                            )),
+                                        ),
+                                        (
+                                            SharedString::from(BannerRows::Two.id()),
+                                            SharedString::from(bongocat_i18n::text(
+                                                language.catalog_locale(),
+                                                "settings.device_screen.banner.rows.two",
+                                            )),
+                                        ),
+                                    ],
+                                    {
+                                        let view = view_entity.clone();
+                                        move |app: &App| {
+                                            SharedString::from(
+                                                view.read(app).device_config().banner_rows.id(),
+                                            )
+                                        }
+                                    },
+                                    {
+                                        let view = view_entity.clone();
+                                        move |value: SharedString, app: &mut App| {
+                                            let rows = BannerRows::from_id(&value)
+                                                .unwrap_or(BannerRows::Auto);
+                                            view.update(app, |view, cx| {
+                                                view.update_device_config(
+                                                    |config| config.banner_rows = rows,
+                                                    cx,
+                                                );
+                                            });
+                                        }
+                                    },
+                                ),
+                            ),
                         ]),
                     SettingGroup::new()
                         .title(bongocat_i18n::text(

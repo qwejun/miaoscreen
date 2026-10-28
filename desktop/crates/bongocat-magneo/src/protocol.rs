@@ -304,6 +304,31 @@ const fn font_code(font: Font) -> u8 {
     }
 }
 
+/// How the panel should break one line of text into rows.
+///
+/// <p>The break itself happens on the panel, not here: a random banner is
+/// chosen there, so the host never sees the sentence it would have to split,
+/// and the panel is the only side that knows how wide the glyphs actually are
+/// in the face it ended up drawing with.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Rows {
+    /// Break only when the text does not fit the circle at its own height.
+    #[default]
+    Auto,
+    /// Never break: one row, and the bezel clips whatever does not fit.
+    One,
+    /// Two rows, split at the space or punctuation nearest the middle.
+    Two,
+}
+
+const fn rows_code(rows: Rows) -> u8 {
+    match rows {
+        Rows::Auto => 0,
+        Rows::One => 1,
+        Rows::Two => 2,
+    }
+}
+
 /// One line of the strip under the picture.
 ///
 /// `text` is a template, not a finished string: the device substitutes the clock
@@ -320,6 +345,10 @@ pub struct OverlayLine {
     pub font: Font,
     /// Centre of the line, in pixels below the top of the band.
     pub center_y: f32,
+    /// How the panel should break this line. Travels in a byte that used to be
+    /// padding, so a panel built before it existed reads zero and behaves as it
+    /// always did.
+    pub rows: Rows,
 }
 
 /// The strip drawn against the bottom edge of the panel.
@@ -380,6 +409,7 @@ impl Overlay {
                     weight: Weight::Bold,
                     font: Font::Rounded,
                     center_y: 58.0,
+                    rows: Rows::One,
                 },
                 OverlayLine {
                     text: "{MM}-{dd} {W}".to_owned(),
@@ -389,6 +419,7 @@ impl Overlay {
                     weight: Weight::Regular,
                     font: Font::Rounded,
                     center_y: 88.0,
+                    rows: Rows::One,
                 },
                 // Alone at the bottom, in the middle of the black the picture
                 // leaves rather than on its last row: sitting further up puts
@@ -405,6 +436,7 @@ impl Overlay {
                     weight: Weight::Regular,
                     font: Font::Rounded,
                     center_y: 712.0,
+                    rows: Rows::Auto,
                 },
             ],
         }
@@ -427,7 +459,7 @@ pub fn overlay(config: &Overlay) -> Vec<u8> {
         writer.u8(align_code(line.align));
         writer.u8(weight_code(line.weight));
         writer.u8(font_code(line.font));
-        writer.u8(0);
+        writer.u8(rows_code(line.rows));
         writer.u16(line.size_px);
         writer.u16(0);
         writer.u32(line.color);

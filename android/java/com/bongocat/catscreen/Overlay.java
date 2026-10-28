@@ -44,6 +44,19 @@ final class Overlay {
      */
     static final int FONT_BUNDLED = 3;
 
+    /**
+     * How the renderer should break a line that is too wide for its own height
+     * of the circle.
+     *
+     * <p>The break happens here rather than on the host because a random banner
+     * is chosen on this side: the host never sees the sentence it would have
+     * had to split, and only this side knows how wide the glyphs really are in
+     * the face the line is drawn with.
+     */
+    static final int ROWS_AUTO = 0;
+    static final int ROWS_ONE = 1;
+    static final int ROWS_TWO = 2;
+
     /** One row of text inside the strip. */
     static final class Line {
 
@@ -55,8 +68,11 @@ final class Overlay {
         final int font;
         /** Centre of the text, in pixels below the top of the strip. */
         final float centerY;
+        /** One of the {@code ROWS_*} constants. */
+        final int rows;
 
-        Line(String text, int sizePx, int color, int align, int weight, int font, float centerY) {
+        Line(String text, int sizePx, int color, int align, int weight, int font, float centerY,
+                int rows) {
             this.text = text;
             this.sizePx = sizePx;
             this.color = color;
@@ -64,6 +80,7 @@ final class Overlay {
             this.weight = weight;
             this.font = font;
             this.centerY = centerY;
+            this.rows = rows;
         }
     }
 
@@ -100,7 +117,9 @@ final class Overlay {
             int align = reader.u8();
             int weight = reader.u8();
             int font = reader.u8();
-            reader.u8();
+            // Was padding until the banner learned to break. A host that still
+            // writes zero asks for the behaviour this renderer always had.
+            int rows = reader.u8();
             int sizePx = reader.u16();
             reader.u16();
             int color = reader.u32();
@@ -109,7 +128,7 @@ final class Overlay {
             String text = new String(reader.buffer(), reader.position(), length,
                     StandardCharsets.UTF_8);
             reader.advance(length);
-            lines[i] = new Line(text, sizePx, color, align, weight, font, centerY);
+            lines[i] = new Line(text, sizePx, color, align, weight, font, centerY, rows);
         }
         return new Overlay(bandPx, background, divider, lines);
     }

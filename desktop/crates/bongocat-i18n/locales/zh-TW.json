@@ -456,6 +456,12 @@
           "rounded": "圓體",
           "system": "系統",
           "mono": "等寬"
+        },
+        "rows": {
+          "label": "標語行數",
+          "auto": "自動",
+          "one": "一行",
+          "two": "兩行"
         }
       },
       "preview": {

@@ -14,10 +14,11 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use bongocat_audio::MotionAudioSink;
-use bongocat_magneo::protocol::{Font, Overlay};
+use bongocat_magneo::protocol::{Font, Overlay, Rows};
 use bongocat_magneo::MagneoHandle;
 use bongocat_ui::{
-    BannerFont, DeviceLink, DeviceLinkMode, DeviceLinkProblem, DeviceLinkState, DeviceOverlayConfig,
+    BannerFont, BannerRows, DeviceLink, DeviceLinkMode, DeviceLinkProblem, DeviceLinkState,
+    DeviceOverlayConfig,
     LiveLink,
 };
 use gpui_kit::App;
@@ -117,6 +118,8 @@ struct StoredConfig {
     /// program writes, which are the ones the layout was drawn around.
     banner_size: Option<u16>,
     banner_font: Option<String>,
+    /// How willing the panel should be to break the banner into rows.
+    banner_rows: Option<String>,
     /// `wireless` or `wired`. Absent means the network, which needs no cable.
     link: Option<String>,
     /// Layout revision of the strip. Absent means the file was written before
@@ -172,6 +175,11 @@ impl StoredConfig {
                 .as_deref()
                 .and_then(BannerFont::from_id)
                 .unwrap_or(defaults.banner_font),
+            banner_rows: self
+                .banner_rows
+                .as_deref()
+                .and_then(BannerRows::from_id)
+                .unwrap_or(defaults.banner_rows),
         }
     }
 
@@ -185,6 +193,7 @@ impl StoredConfig {
             banner_random: Some(config.banner_random),
             banner_size: Some(config.banner_size),
             banner_font: Some(config.banner_font.id().to_owned()),
+            banner_rows: Some(config.banner_rows.id().to_owned()),
             link: None,
             strip_layout: Some(STRIP_LAYOUT),
             adb: None,
@@ -630,6 +639,14 @@ fn overlay_for(config: &DeviceOverlayConfig) -> Overlay {
             BannerFont::Rounded => Font::Rounded,
             BannerFont::System => Font::System,
             BannerFont::Mono => Font::Mono,
+        };
+        // The panel breaks the line itself, because a random banner is chosen
+        // there and never passes through here. This only carries how willing it
+        // should be.
+        line.rows = match config.banner_rows {
+            BannerRows::Auto => Rows::Auto,
+            BannerRows::One => Rows::One,
+            BannerRows::Two => Rows::Two,
         };
     }
     strip

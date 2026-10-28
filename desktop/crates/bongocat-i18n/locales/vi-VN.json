@@ -456,6 +456,12 @@
           "rounded": "Bo tròn",
           "system": "Hệ thống",
           "mono": "Đơn cách"
+        },
+        "rows": {
+          "label": "Số dòng khẩu hiệu",
+          "auto": "Tự động",
+          "one": "Một dòng",
+          "two": "Hai dòng"
         }
       },
       "preview": {

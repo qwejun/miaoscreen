@@ -92,6 +92,41 @@ impl BannerFont {
     }
 }
 
+/// How many rows the banner is allowed to take.
+///
+/// <p>The panel does the breaking, because a random banner is chosen there and
+/// the host never sees the sentence. This setting only says how willing it
+/// should be — a short line reads best on one row, and a sentence that fills
+/// the width of a round panel reads better as two.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum BannerRows {
+    /// Break only when the text would run under the bezel.
+    Auto,
+    /// Keep it on one row whatever happens.
+    One,
+    /// Two rows, split at the space or punctuation nearest the middle.
+    Two,
+}
+
+impl BannerRows {
+    pub fn id(self) -> &'static str {
+        match self {
+            Self::Auto => "auto",
+            Self::One => "one",
+            Self::Two => "two",
+        }
+    }
+
+    pub fn from_id(id: &str) -> Option<Self> {
+        match id {
+            "auto" => Some(Self::Auto),
+            "one" => Some(Self::One),
+            "two" => Some(Self::Two),
+            _ => None,
+        }
+    }
+}
+
 /// The strip settings the page edits.
 #[derive(Clone, Debug, PartialEq)]
 pub struct DeviceOverlayConfig {
@@ -109,6 +144,7 @@ pub struct DeviceOverlayConfig {
     /// Point size of the banner on the panel.
     pub banner_size: u16,
     pub banner_font: BannerFont,
+    pub banner_rows: BannerRows,
 }
 
 impl Default for DeviceOverlayConfig {
@@ -127,6 +163,7 @@ impl Default for DeviceOverlayConfig {
             banner_random: false,
             banner_size: 30,
             banner_font: BannerFont::Kuaile,
+            banner_rows: BannerRows::Auto,
         }
     }
 }
