@@ -431,7 +431,7 @@
         }
       },
       "band": {
-        "label": "Hauteur de la bande (pixels)"
+        "label": "Hauteur de la zone d'infos (px, plein écran = calque)"
       },
       "clock": {
         "label": "Format de l'heure"
@@ -440,7 +440,10 @@
         "label": "Format de la date"
       },
       "banner": {
-        "label": "Texte du bandeau"
+        "label": "Texte du bandeau",
+        "random": {
+          "label": "Encouragement aléatoire"
+      }
       },
       "preview": {
         "title": "Aperçu",

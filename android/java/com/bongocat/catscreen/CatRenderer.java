@@ -5,6 +5,7 @@ import android.graphics.Canvas;
 import android.graphics.Color;
 import android.graphics.LinearGradient;
 import android.graphics.Paint;
+import android.graphics.Path;
 import android.graphics.PorterDuff;
 import android.graphics.Shader;
 import android.graphics.Typeface;
@@ -267,14 +268,22 @@ public final class CatRenderer implements GLSurfaceView.Renderer {
     // ------------------------------------------------------------------ band
     // The strip under the picture. Its layout rule: the picture keeps its
     // centre while there is room, and is pushed up only once the band would
-    // cover its bottom edge. With the default 160px band and the 1.72:1 canvas
-    // the picture is untouched — the band lives in the black that was already
-    // there.
+    // cover its bottom edge.
+    //
+    // A band taller than most of the surface is not a bar at all — it is a
+    // layer over the whole picture, and the host uses that to put the clock in
+    // the black above the cat rather than in the sliver at the bottom where a
+    // round panel has no width left. Such a layer draws no background and
+    // moves nothing: only its text reaches the glass.
 
+    /** Above this share of the surface the band becomes a layer over it. */
+    private static final float BAND_LAYER_SHARE = 0.60f;
     /** Clearance between the picture's bottom and the top of the band. */
     private static final int BAND_BOTTOM_MARGIN_PX = 6;
     /** Inset for left- and right-aligned strip text. */
     private static final int BAND_TEXT_MARGIN_PX = 24;
+    /** Extra clearance between the round bezel and the outermost glyph. */
+    private static final int BAND_TEXT_EDGE_PADDING_PX = 12;
     private static final int BAND_DIVIDER_COLOR = 0x33FFFFFF;
     /**
      * How much of the strip's height is spent dissolving into the picture.
@@ -288,11 +297,85 @@ public final class CatRenderer implements GLSurfaceView.Renderer {
      */
     private static final float BAND_FADE_SHARE = 0.40f;
 
+    // ------------------------------------------------------------- clock card
+    // A white note pinned inside the upper-left arc, holding the time and the
+    // date. The geometry is stated on an 800px panel and scaled to whatever the
+    // surface actually is, because it is the panel's own shape that decides
+    // where the corner still has room: at (120,158) the card's farthest corner
+    // sits 370px from the centre, which leaves 30px of clearance to the bezel.
+    //
+    // The card is sized to its contents, not to the corner: a note that fills
+    // the space it is allowed stops reading as a note and starts competing with
+    // the picture. Nothing about it is configurable — a card with a movable
+    // corner would need the host to know this panel's curvature, and the one
+    // thing the host is not allowed to know is the glass.
+
+    /** Top-left corner of the card on an 800px panel. */
+    private static final int CARD_X = 120;
+    private static final int CARD_Y = 158;
+    private static final int CARD_WIDTH = 148;
+    private static final int CARD_HEIGHT = 106;
+    private static final float CARD_RADIUS = 14f;
+    /**
+     * The card's title strip: a lighter band across the top, split from the
+     * paper by a hairline. It carries no text — the fold mark and the paw are
+     * what make the block read as a card rather than as a white rectangle
+     * dropped on the picture.
+     */
+    private static final int CARD_HEADER_HEIGHT = 30;
+    private static final int CARD_FILL = 0xFFFFFFFF;
+    private static final int CARD_HEADER_FILL = 0xFFF6F6F8;
+    private static final int CARD_HAIRLINE = 0xFFE3E3E6;
+    private static final int CARD_FOLD_COLOR = 0xFF9A9AA0;
+    private static final int CARD_PAW_COLOR = 0xFFFF8FA8;
+    /** The panel the card's geometry above was measured on. */
+    private static final float CARD_REFERENCE_PX = 800f;
+    /**
+     * What a card line is drawn in when the card itself cannot be drawn.
+     *
+     * <p>Its own colour is a near-black chosen to sit on white; on bare artwork
+     * that is invisible. This is the light grey the rest of the layer uses.
+     */
+    private static final int CARD_TEXT_ON_ARTWORK = 0xFFE8_EAED;
+
     /** The decorative Chinese face the panel's firmware ships. */
     private static final String ROUNDED_FONT_PATH = "/system/fonts/FZLanTYJW-Regular.otf";
     private static final String ROUNDED_BOLD_FONT_PATH = "/system/fonts/FZLanTYJW-Bold.otf";
     private static final String[] WEEKDAYS =
             {"周日", "周一", "周二", "周三", "周四", "周五", "周六"};
+
+    /**
+     * The lines the host's `{random}` marker stands for.
+     *
+     * <p>They live here rather than on the host because the rotation has to keep
+     * running while the host is closed, and because a clock that only advances
+     * when something reconnects is not a clock. Each is short enough to fit the
+     * bottom chord without shrinking, and the hour — not a counter — decides
+     * which one is showing, so a restart lands on the line the panel was
+     * already showing.
+     */
+    private static final String[] RANDOM_BANNERS = {
+            "今天也要加油",
+            "慢慢来，比较快",
+            "你已经很努力了",
+            "先喝口水吧",
+            "摸鱼也是生产力",
+            "别急，来得及",
+            "此刻正好",
+            "一起加油喵",
+            "深呼吸，再来一次",
+            "小事也有意义",
+            "今天会很好",
+            "猫陪你上班",
+            "专注二十分钟",
+            "记得站起来走走",
+            "比昨天好一点",
+            "想休息就休息",
+            "有点累也正常",
+            "保持呼吸",
+            "你值得被夸",
+            "晚上早点睡",
+    };
 
     private Overlay overlay;
     private int overlayProgram;
@@ -304,6 +387,9 @@ public final class CatRenderer implements GLSurfaceView.Renderer {
     private Bitmap bandBitmap;
     private Canvas bandCanvas;
     private Paint bandPaint;
+    /** Reused rather than allocated per repaint; the GL thread owns both. */
+    private final Path cardOutline = new Path();
+    private final Path cardFold = new Path();
     private int bandTexture;
     private int bandWidth;
     private int bandHeight;
@@ -633,10 +719,12 @@ public final class CatRenderer implements GLSurfaceView.Renderer {
         // The band sits under the picture. While there is black to spare the
         // picture keeps the centre it has always had — with the default band and
         // the 1.72:1 canvas this is exactly the old layout — and only a band
-        // tall enough to reach the picture pushes it up, never down.
+        // tall enough to reach the picture pushes it up, never down. A band
+        // that covers the surface pushes nothing: it is a layer, and the whole
+        // point of it is that the picture stays where it is.
         int band = overlay != null ? Math.max(0, overlay.bandPx) : 0;
         float shiftPx = 0f;
-        if (band > 0) {
+        if (band > 0 && !isLayerBand(band)) {
             float picturePxH = modelHeight * scaleY * 0.5f * viewHeight;
             float limitCenter = (viewHeight - band) - picturePxH * 0.5f - BAND_BOTTOM_MARGIN_PX;
             shiftPx = Math.min(0f, limitCenter - viewHeight * 0.5f);
@@ -667,13 +755,21 @@ public final class CatRenderer implements GLSurfaceView.Renderer {
         if (strip == null || strip.bandPx <= 0 || strip.lines.length == 0) {
             return;
         }
-        if (bandBitmap == null || bandWidth != viewWidth || bandHeight != strip.bandPx) {
-            rebuildBand(strip.bandPx);
+        // A layer can never be taller than the surface it lies over, and it has
+        // to be exactly that tall for the line positions to be screen
+        // coordinates rather than offsets from a bottom edge.
+        int bandPx = isLayerBand(strip.bandPx) ? viewHeight : strip.bandPx;
+        if (bandBitmap == null || bandWidth != viewWidth || bandHeight != bandPx) {
+            rebuildBand(bandPx);
         }
         long second = System.currentTimeMillis() / 1000L;
         if (bandDirty || second != bandSecond) {
             bandSecond = second;
-            if (repaintBand(strip)) {
+            // A dirty band means the description itself changed — a new colour,
+            // a new alignment, a new line count — and none of those show up in
+            // the formatted text, so the repaint has to be forced rather than
+            // decided by a string comparison.
+            if (repaintBand(strip, bandDirty)) {
                 GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, bandTexture);
                 GLUtils.texImage2D(GLES20.GL_TEXTURE_2D, 0, bandBitmap, 0);
                 bandDirty = false;
@@ -691,8 +787,21 @@ public final class CatRenderer implements GLSurfaceView.Renderer {
         GLES20.glActiveTexture(GLES20.GL_TEXTURE0);
         GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, bandTexture);
         // Clip-space y grows upwards, so the band's top edge is above -1.
-        float bandTop = -1f + 2f * strip.bandPx / viewHeight;
+        float bandTop = -1f + 2f * bandHeight / viewHeight;
         drawQuad(overlayPos, overlayUv, -1f, 1f, -1f, bandTop);
+    }
+
+    /**
+     * Whether a band of this height covers the picture instead of sitting under
+     * it.
+     *
+     * <p>Threshold rather than a flag because the height is the only thing the
+     * wire carries, and because the two modes differ by an order of magnitude:
+     * a bar under the artwork never needs six tenths of the surface, and a layer
+     * over it has no reason to be shorter.
+     */
+    private boolean isLayerBand(int bandPx) {
+        return bandPx >= viewHeight * BAND_LAYER_SHARE;
     }
 
     /** Allocates the band texture and its bitmap for the current surface. */
@@ -742,10 +851,13 @@ public final class CatRenderer implements GLSurfaceView.Renderer {
     /**
      * Rasterises the strip. Returns whether anything changed; the caller only
      * uploads the texture then.
+     *
+     * <p>{@code force} repaints regardless of the text, for the case where the
+     * description changed but the strings it produces did not.
      */
-    private boolean repaintBand(Overlay strip) {
+    private boolean repaintBand(Overlay strip, boolean force) {
         bandCalendar.setTimeInMillis(System.currentTimeMillis());
-        boolean changed = false;
+        boolean changed = force;
         for (int i = 0; i < strip.lines.length; i++) {
             bandScratch[i] = formatTemplate(strip.lines[i].text, bandCalendar);
             String previous = bandRendered[i];
@@ -760,7 +872,11 @@ public final class CatRenderer implements GLSurfaceView.Renderer {
         // the picture through, and `Mode.SRC` with the background colour would
         // paint it solid before the fade is drawn over it.
         bandCanvas.drawColor(Color.TRANSPARENT, PorterDuff.Mode.CLEAR);
-        int fadeHeight = Math.round(bandHeight * BAND_FADE_SHARE);
+        // A layer draws no background at all. It covers the whole surface, so
+        // filling it would black out the cat; the text carries its own shadow
+        // and that is the only thing that reaches the glass.
+        boolean layer = isLayerBand(strip.bandPx);
+        int fadeHeight = layer ? 0 : Math.round(bandHeight * BAND_FADE_SHARE);
         if (fadeHeight > 0) {
             // Same colour at both ends, only the alpha moves: the fade has to
             // land on exactly the background underneath it, or the seam shows.
@@ -773,14 +889,23 @@ public final class CatRenderer implements GLSurfaceView.Renderer {
             bandCanvas.drawRect(0f, 0f, bandWidth, fadeHeight, bandPaint);
             bandPaint.setShader(null);
         }
-        bandPaint.setColor(strip.background);
-        bandPaint.setStyle(Paint.Style.FILL);
-        bandCanvas.drawRect(0f, fadeHeight, bandWidth, bandHeight, bandPaint);
-        if (strip.divider) {
-            bandPaint.setColor(BAND_DIVIDER_COLOR);
-            bandPaint.setTextAlign(Paint.Align.LEFT);
-            bandCanvas.drawRect(0f, 0f, bandWidth, 1f, bandPaint);
+        if (!layer) {
+            bandPaint.setColor(strip.background);
+            bandPaint.setStyle(Paint.Style.FILL);
+            bandCanvas.drawRect(0f, fadeHeight, bandWidth, bandHeight, bandPaint);
+            if (strip.divider) {
+                bandPaint.setColor(BAND_DIVIDER_COLOR);
+                bandPaint.setTextAlign(Paint.Align.LEFT);
+                bandCanvas.drawRect(0f, 0f, bandWidth, 1f, bandPaint);
+            }
+        } else {
+            // Under the text, because it exists to be read from.
+            drawClockCard();
         }
+        // Everything below is expressed in surface coordinates, so a bar at the
+        // bottom and a layer over the whole picture go through the same maths.
+        float bandTop = viewHeight - bandHeight;
+        float scale = cardScale();
         for (int i = 0; i < strip.lines.length; i++) {
             Overlay.Line line = strip.lines[i];
             bandRendered[i] = bandScratch[i];
@@ -788,19 +913,120 @@ public final class CatRenderer implements GLSurfaceView.Renderer {
             bandPaint.setTextSize(line.sizePx);
             bandPaint.setColor(line.color);
             bandPaint.setAntiAlias(true);
-            // A soft drop shadow, because the text now sits partly over the
-            // faded part of the strip rather than on flat black. It costs one
-            // extra blit per line on a bitmap this size, and it is what keeps
-            // the clock legible where the desk shows through behind it.
+            // A soft drop shadow, because without a card these lines sit over
+            // the artwork rather than on flat black. It is what keeps the clock
+            // legible where the desk shows through behind it.
             bandPaint.setShadowLayer(3f, 0f, 2f, 0x99000000);
-            bandPaint.setTextAlign(paintAlign(line.align));
+            Paint.FontMetrics metrics = bandPaint.getFontMetrics();
+
+            float centerY;
+            float x;
+            if (layer && line.align == Overlay.ALIGN_CARD) {
+                centerY = CARD_Y * scale + line.centerY * scale;
+                // Centred in the card, both lines: two strings of different
+                // widths sharing a left edge read as a table, and a table is
+                // not what a note looks like.
+                x = (CARD_X + CARD_WIDTH * 0.5f) * scale;
+                bandPaint.setTextAlign(Paint.Align.CENTER);
+                // Ink on paper: a shadow here reads as a dirty smudge rather
+                // than as depth.
+                bandPaint.clearShadowLayer();
+            } else {
+                centerY = bandTop + line.centerY;
+                int align = line.align;
+                if (align == Overlay.ALIGN_CARD) {
+                    // No card, so the near-black chosen to sit on white would
+                    // vanish into the picture.
+                    align = Overlay.ALIGN_LEFT;
+                    bandPaint.setColor(CARD_TEXT_ON_ARTWORK);
+                }
+                bandPaint.setTextAlign(paintAlign(align));
+                x = paintX(align, centerY, bandRendered[i]);
+            }
             // Vertical centring by hand: the baseline that puts the glyph box's
             // centre on the line's own centre.
-            Paint.FontMetrics metrics = bandPaint.getFontMetrics();
-            float baseline = line.centerY - (metrics.ascent + metrics.descent) * 0.5f;
-            bandCanvas.drawText(bandRendered[i], paintX(line.align), baseline, bandPaint);
+            bandCanvas.drawText(
+                    bandRendered[i],
+                    x,
+                    centerY - (metrics.ascent + metrics.descent) * 0.5f,
+                    bandPaint);
         }
         return true;
+    }
+
+    /** Scales the card's 800px geometry to the surface actually on offer. */
+    private float cardScale() {
+        return Math.min(viewWidth, viewHeight) / CARD_REFERENCE_PX;
+    }
+
+    /** Paints the clock card's paper, before anything is written on it. */
+    private void drawClockCard() {
+        float scale = cardScale();
+        float left = CARD_X * scale;
+        float top = CARD_Y * scale;
+        float right = left + CARD_WIDTH * scale;
+        float bottom = top + CARD_HEIGHT * scale;
+        float radius = CARD_RADIUS * scale;
+
+        bandPaint.setShader(null);
+        bandPaint.setStyle(Paint.Style.FILL);
+        bandPaint.setAntiAlias(true);
+        bandPaint.clearShadowLayer();
+
+        bandPaint.setColor(CARD_FILL);
+        bandCanvas.drawRoundRect(left, top, right, bottom, radius, radius, bandPaint);
+
+        // The header is a plain rectangle, so it has to be cut to the card's own
+        // outline or its square corners would poke out through the rounding.
+        bandCanvas.save();
+        cardOutline.reset();
+        cardOutline.addRoundRect(left, top, right, bottom, radius, radius, Path.Direction.CW);
+        bandCanvas.clipPath(cardOutline);
+
+        float headerBottom = top + CARD_HEADER_HEIGHT * scale;
+        bandPaint.setColor(CARD_HEADER_FILL);
+        bandCanvas.drawRect(left, top, right, headerBottom, bandPaint);
+        bandPaint.setColor(CARD_HAIRLINE);
+        bandCanvas.drawRect(left, headerBottom, right,
+                headerBottom + Math.max(1f, scale), bandPaint);
+        bandCanvas.restore();
+
+        drawCardFold((left + right) * 0.5f,
+                top + CARD_HEADER_HEIGHT * scale * 0.5f + scale, scale);
+        drawCardPaw(right - 16f * scale, top + 12f * scale, scale);
+    }
+
+    /** The small upward chevron in the middle of the header. */
+    private void drawCardFold(float centerX, float centerY, float scale) {
+        float halfWidth = 5f * scale;
+        float height = 3f * scale;
+        cardFold.reset();
+        cardFold.moveTo(centerX - halfWidth, centerY + height);
+        cardFold.lineTo(centerX, centerY - height);
+        cardFold.lineTo(centerX + halfWidth, centerY + height);
+
+        bandPaint.setShader(null);
+        bandPaint.setStyle(Paint.Style.STROKE);
+        bandPaint.setColor(CARD_FOLD_COLOR);
+        bandPaint.setStrokeWidth(Math.max(1.2f, 1.6f * scale));
+        bandPaint.setStrokeCap(Paint.Cap.ROUND);
+        bandPaint.setStrokeJoin(Paint.Join.ROUND);
+        bandPaint.setAntiAlias(true);
+        bandCanvas.drawPath(cardFold, bandPaint);
+        bandPaint.setStyle(Paint.Style.FILL);
+    }
+
+    /** The pink paw in the header's right corner: three toes over one pad. */
+    private void drawCardPaw(float centerX, float centerY, float scale) {
+        bandPaint.setShader(null);
+        bandPaint.setStyle(Paint.Style.FILL);
+        bandPaint.setColor(CARD_PAW_COLOR);
+        bandPaint.setAntiAlias(true);
+        float unit = scale;
+        bandCanvas.drawCircle(centerX, centerY + 2.6f * unit, 4.4f * unit, bandPaint);
+        bandCanvas.drawCircle(centerX - 4.6f * unit, centerY - 1.6f * unit, 2.1f * unit, bandPaint);
+        bandCanvas.drawCircle(centerX, centerY - 3.6f * unit, 2.4f * unit, bandPaint);
+        bandCanvas.drawCircle(centerX + 4.6f * unit, centerY - 1.6f * unit, 2.1f * unit, bandPaint);
     }
 
     /** Substitutes the clock placeholders. Unknown fields pass through untouched. */
@@ -854,10 +1080,28 @@ public final class CatRenderer implements GLSurfaceView.Renderer {
             case "W":
                 out.append(WEEKDAYS[calendar.get(Calendar.DAY_OF_WEEK) - 1]);
                 break;
+            case "random":
+                // One line per hour, derived from the clock so that reconnects
+                // and restarts land on the same one.
+                out.append(RANDOM_BANNERS[randomBannerSlot(calendar)]);
+                break;
             default:
                 out.append('{').append(field).append('}');
                 break;
         }
+    }
+
+    /**
+     * Which random line the wall clock selects, one per hour.
+     *
+     * <p>A negative millisecond value is possible before 1970, and `%` keeps the
+     * sign of its left operand, so the result is folded back by hand. `floorMod`
+     * would do it, but it is API 24 and this panel is on 22.
+     */
+    private static int randomBannerSlot(Calendar calendar) {
+        int count = RANDOM_BANNERS.length;
+        long hours = calendar.getTimeInMillis() / 3_600_000L;
+        return (int) (((hours % count) + count) % count);
     }
 
     private static String pad(int value, int width) {
@@ -919,15 +1163,42 @@ public final class CatRenderer implements GLSurfaceView.Renderer {
         }
     }
 
-    private float paintX(int align) {
-        switch (align) {
-            case Overlay.ALIGN_LEFT:
-                return BAND_TEXT_MARGIN_PX;
-            case Overlay.ALIGN_RIGHT:
-                return bandWidth - BAND_TEXT_MARGIN_PX;
-            default:
-                return bandWidth * 0.5f;
+    /**
+     * Where a line starts or ends, kept inside the circle.
+     *
+     * <p>A strip sized to hold three centred lines in the bottom of a round
+     * panel uses a fraction of its width, because the shape itself narrows to
+     * nothing at the bottom edge. Rather than shrink the text until it fits the
+     * narrowest row, geometry decides the inset: the chord at the row's own
+     * height is the space that actually exists there, so a line pinned to the
+     * left edge sits as far out as the glass allows instead of hugging the
+     * centre.
+     *
+     * <p>{@code screenY} is the line's centre in surface coordinates, which is
+     * the same axis the chord is measured on.
+     */
+    private float paintX(int align, float screenY, String text) {
+        if (align == Overlay.ALIGN_CENTER) {
+            return bandWidth * 0.5f;
         }
+        float radius = Math.min(viewWidth, viewHeight) * 0.5f;
+        float centreX = viewWidth * 0.5f;
+        float centreY = viewHeight * 0.5f;
+        float dy = Math.abs(screenY - centreY);
+        float halfChord = dy >= radius ? 0f : (float) Math.sqrt(radius * radius - dy * dy);
+        // Half the text plus a little air, so the glyphs clear the bezel rather
+        // than the text box's origin clearing it.
+        float inset = bandPaint.measureText(text) * 0.5f + BAND_TEXT_EDGE_PADDING_PX;
+        float edge = Math.max(0f, centreX - halfChord) + inset;
+        if (edge > centreX) {
+            // A row so close to the edge that even the inset does not fit: fall
+            // back to the fixed margin rather than drawing outside the circle.
+            edge = centreX;
+        }
+        if (align == Overlay.ALIGN_LEFT) {
+            return Math.max(BAND_TEXT_MARGIN_PX, edge);
+        }
+        return Math.min(bandWidth - BAND_TEXT_MARGIN_PX, bandWidth - edge);
     }
 
     /**

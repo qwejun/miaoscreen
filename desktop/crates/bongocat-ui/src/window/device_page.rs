@@ -50,19 +50,28 @@ pub struct DeviceOverlayConfig {
     pub clock: String,
     pub date: String,
     pub banner: String,
+    /// Whether the banner is the text below or a line the publisher picks.
+    ///
+    /// The panel has no idea which is in force and does not need to: both
+    /// travel as the same string. Keeping the two apart here means switching
+    /// back does not lose whatever the person typed.
+    pub banner_random: bool,
 }
 
 impl Default for DeviceOverlayConfig {
     fn default() -> Self {
         Self {
             enabled: true,
-            // Matches `Overlay::default_strip`: tall enough to cover the bottom
-            // of the picture so the panel can fade it in rather than butt a
-            // black bar against the artwork.
-            band_px: 180,
+            // Matches `Overlay::default_strip`: a full-surface layer, so the
+            // clock and date sit on a card in the upper-left corner where the
+            // panel is still wide, and only the banner is left at the bottom.
+            band_px: 800,
             clock: "{HH}:{mm}".to_owned(),
-            date: "{yyyy}-{MM}-{dd} {W}".to_owned(),
+            // Short on purpose: the card is under 150px wide, and a four-digit
+            // year alone would push the weekday past its edge.
+            date: "{MM}-{dd} {W}".to_owned(),
             banner: "今天也要加油".to_owned(),
+            banner_random: false,
         }
     }
 }

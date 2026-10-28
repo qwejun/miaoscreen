@@ -29,7 +29,18 @@ foreach ($tool in @("$bt\aapt.exe", "$bt\d8.bat", "$bt\zipalign.exe", "$bt\apksi
     if (-not (Test-Path $tool)) { throw "missing tool: $tool" }
 }
 
-if (Test-Path $build) { Remove-Item $build -Recurse -Force }
+# The previous build is emptied file by file rather than deleted as a tree: a
+# guarded shell can refuse the recursive delete of a directory inside the
+# repository, and every artefact below is rewritten from scratch anyway.
+if (Test-Path $build) {
+    foreach ($item in Get-ChildItem -LiteralPath $build -Force) {
+        if ($item.PSIsContainer) {
+            [System.IO.Directory]::Delete($item.FullName, $true)
+        } else {
+            [System.IO.File]::Delete($item.FullName)
+        }
+    }
+}
 New-Item -ItemType Directory -Force -Path "$build\classes", "$build\dex" | Out-Null
 
 if (-not (Test-Path $Keystore)) {

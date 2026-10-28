@@ -42,11 +42,23 @@ const CABLE_LAUNCH_INTERVAL: Duration = Duration::from_secs(30);
 const CABLE_PANEL_GRACE: Duration = Duration::from_secs(8);
 
 /// The strip layout this build writes: band height and line positions as of the
-/// fade. Bumped when the geometry changes so an older file can be told apart
-/// from one a person tuned by hand.
-const STRIP_LAYOUT: u32 = 1;
+/// clock card in the upper-left corner. Bumped when the geometry changes so an
+/// older file can be told apart from one a person tuned by hand.
+///
+/// Revision 2 moved the clock from the bottom bar to the top of the picture,
+/// which is not a height a person could have chosen — the band stopped being a
+/// bar. Revision 3 kept that height and put the clock and the date on a card,
+/// which shortened the date template. A file from an earlier revision therefore
+/// keeps its height and its text only if those were never one of the defaults.
+const STRIP_LAYOUT: u32 = 3;
 
-/// The publisher as the model's audio destination.///
+/// The band heights and the date template previous builds wrote as their own
+/// defaults.
+const PREVIOUS_DEFAULT_BANDS: [u32; 3] = [160, 200, 800];
+const LEGACY_DATE_TEMPLATE: &str = "{yyyy}-{MM}-{dd} {W}";
+
+/// The publisher as the model's audio destination.
+///
 /// The panel has the speaker the user is looking at, so the clips travel with the
 /// model and the play command travels as an index. Nothing is decoded on this
 /// side: the file bytes go over the wire as they are and the panel's own player
@@ -90,6 +102,8 @@ struct StoredConfig {
     clock: Option<String>,
     date: Option<String>,
     banner: Option<String>,
+    /// Whether the banner comes from the list rather than from `banner`.
+    banner_random: Option<bool>,
     /// `wireless` or `wired`. Absent means the network, which needs no cable.
     link: Option<String>,
     /// Layout revision of the strip. Absent means the file was written before
@@ -106,22 +120,32 @@ struct StoredConfig {
 impl StoredConfig {
     fn into_config(self) -> DeviceOverlayConfig {
         let defaults = DeviceOverlayConfig::default();
-        // A file without a layout revision carries 160 only because that was
-        // the default when it was written — the person did not pick it. The
-        // height is replaced so the strip reaches up over the picture and the
-        // panel can fade it in; every other height is a choice and is kept.
-        let legacy = self.strip_layout.is_none();
+        // A file written before the current layout carries the height that was
+        // the default when it was written — the person did not pick it. Those
+        // heights are replaced so the layer reaches the top of the picture;
+        // every other height is a choice and is kept.
+        let legacy = self.strip_layout.map_or(true, |layout| layout < STRIP_LAYOUT);
         let band_px = match self.band_px {
-            Some(160) if legacy => defaults.band_px,
+            Some(px) if legacy && PREVIOUS_DEFAULT_BANDS.contains(&px) => defaults.band_px,
             Some(px) => px,
             None => defaults.band_px,
+        };
+        // The same reasoning for the date: revision 3 moved it onto the clock
+        // card, where a full `2026-10-28 周三` no longer fits. Only the template
+        // this program used to write is replaced; anything a person typed is
+        // theirs and stays.
+        let date = match self.date {
+            Some(text) if legacy && text == LEGACY_DATE_TEMPLATE => defaults.date,
+            Some(text) => text,
+            None => defaults.date,
         };
         DeviceOverlayConfig {
             enabled: self.enabled.unwrap_or(defaults.enabled),
             band_px,
             clock: self.clock.unwrap_or(defaults.clock),
-            date: self.date.unwrap_or(defaults.date),
+            date,
             banner: self.banner.unwrap_or(defaults.banner),
+            banner_random: self.banner_random.unwrap_or(defaults.banner_random),
         }
     }
 
@@ -132,6 +156,7 @@ impl StoredConfig {
             clock: Some(config.clock.clone()),
             date: Some(config.date.clone()),
             banner: Some(config.banner.clone()),
+            banner_random: Some(config.banner_random),
             link: None,
             strip_layout: Some(STRIP_LAYOUT),
             adb: None,
@@ -527,6 +552,16 @@ impl DeviceLink for ProductDeviceLink {
     }
 }
 
+/// The placeholder the panel substitutes with a line of its own.
+///
+/// The list lives on the panel rather than here because the rotation has to
+/// keep running while this program is closed: the clock is already the panel's,
+/// and a slogan that only changes when the host reconnects would sit on the
+/// same line for a week. Sending a marker instead of a sentence also keeps the
+/// reconnects honest — the panel repaints its strip every minute, so it notices
+/// the hour change on its own.
+const RANDOM_BANNER_PLACEHOLDER: &str = "{random}";
+
 /// The wire form of the strip.
 ///
 /// Typography comes from `Overlay::default_strip` and only the text travels, so
@@ -541,9 +576,14 @@ fn overlay_for(config: &DeviceOverlayConfig) -> Overlay {
     }
     let mut strip = Overlay::default_strip();
     strip.band_px = config.band_px;
-    let texts = [&config.clock, &config.date, &config.banner];
+    let banner = if config.banner_random {
+        RANDOM_BANNER_PLACEHOLDER.to_owned()
+    } else {
+        config.banner.clone()
+    };
+    let texts = [config.clock.clone(), config.date.clone(), banner];
     for (line, text) in strip.lines.iter_mut().zip(texts) {
-        line.text = (*text).clone();
+        line.text = text;
     }
     strip
 }

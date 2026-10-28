@@ -51,6 +51,24 @@ final class PublisherClient implements Runnable, UdpFrameChannel.Sink {
     private static final int DISCOVER_AFTER_FAILURES = 2;
     /** How long one discovery round listens for an answer. */
     private static final int DISCOVERY_TIMEOUT_MS = 1200;
+    /**
+     * How long a loopback address is defended before discovery may take over.
+     *
+     * <p>A loopback address on this panel means the cable: the host end of the
+     * tunnel is a forward that the publisher opens with one command, and the
+     * panel is started before that command has finished running. The gap is a
+     * couple of seconds, and it is longer than {@link #DISCOVER_AFTER_FAILURES}
+     * refusals take — a refused loopback connection fails immediately, it does
+     * not wait out the connect timeout.
+     *
+     * <p>Without this the panel loses the race, finds the host on the network and
+     * stays there for good: it is then connected, healthy and drawing, so nothing
+     * ever fails again and nothing ever moves it back onto the cable. The result
+     * looks exactly like "it says wired but it is running on Wi-Fi", which is a
+     * setting that was in fact honoured and a tunnel that was in fact going to
+     * work a moment later.
+     */
+    private static final int LOOPBACK_PATIENCE_MS = 8000;
 
     /**
      * The publisher ticks once a second even when the picture is still, so a
@@ -322,6 +340,9 @@ final class PublisherClient implements Runnable, UdpFrameChannel.Sink {
     public void run() {
         long lastStats = 0;
         int failures = 0;
+        // When the current address started failing for this run of refusals.
+        // Zero means the address is not currently failing.
+        long failingSince = 0L;
         while (running) {
             Socket connection = new Socket();
             InetSocketAddress endpoint = parseAddress(address);
@@ -331,6 +352,7 @@ final class PublisherClient implements Runnable, UdpFrameChannel.Sink {
                 connection.setSoTimeout(READ_TIMEOUT_MS);
                 socket = connection;
                 failures = 0;
+                failingSince = 0L;
                 publish("connected", false);
                 // The datagram channel is per connection: a new control socket
                 // means the host may be a different process on a different port.
@@ -367,21 +389,35 @@ final class PublisherClient implements Runnable, UdpFrameChannel.Sink {
                 break;
             }
             failures++;
+            if (failingSince == 0L) {
+                failingSince = System.currentTimeMillis();
+            }
             // After a couple of refusals, stop trusting the address and ask the
             // network. The path this panel was told about is the path it is
             // stuck on, and the host cannot correct it over a link that is down:
             // a panel left on a loopback port after the cable went away would
             // otherwise retry forever at an address nothing answers.
+            //
+            // The cable is the exception. Its tunnel is opened by the host and
+            // the panel is usually started before that has finished, so the
+            // first refusals are the host still working rather than the cable
+            // being gone. See `LOOPBACK_PATIENCE_MS`.
             if (failures >= DISCOVER_AFTER_FAILURES
                     && failures % DISCOVER_AFTER_FAILURES == 0) {
-                InetSocketAddress found =
-                        HostDiscovery.find(endpoint.getPort(), DISCOVERY_TIMEOUT_MS);
-                if (found != null) {
-                    String next = found.getAddress().getHostAddress() + ":" + found.getPort();
-                    if (!next.equals(address)) {
-                        Log.i(TAG, "discovery moved us from " + address + " to " + next);
-                        switchAddress(next);
-                        failures = 0;
+                boolean onCable = endpoint.getAddress() != null
+                        && endpoint.getAddress().isLoopbackAddress();
+                long failing = System.currentTimeMillis() - failingSince;
+                if (!onCable || failing >= LOOPBACK_PATIENCE_MS) {
+                    InetSocketAddress found =
+                            HostDiscovery.find(endpoint.getPort(), DISCOVERY_TIMEOUT_MS);
+                    if (found != null) {
+                        String next = found.getAddress().getHostAddress() + ":" + found.getPort();
+                        if (!next.equals(address)) {
+                            Log.i(TAG, "discovery moved us from " + address + " to " + next);
+                            switchAddress(next);
+                            failures = 0;
+                            failingSince = 0L;
+                        }
                     }
                 }
             }

@@ -20,6 +20,16 @@ final class Overlay {
     static final int ALIGN_LEFT = 0;
     static final int ALIGN_CENTER = 1;
     static final int ALIGN_RIGHT = 2;
+    /**
+     * A line that belongs on the clock card rather than on the strip.
+     *
+     * <p>Its {@code centerY} is then measured from the top of the card, and its
+     * x comes from the card's own padding instead of from the circle's chord.
+     * The card only exists in the layer layout — a short bar at the bottom of a
+     * round panel has no room for one — so the renderer falls back to plain
+     * left-aligned text when the band is too short to be a layer.
+     */
+    static final int ALIGN_CARD = 3;
 
     static final int WEIGHT_REGULAR = 0;
     static final int WEIGHT_BOLD = 1;

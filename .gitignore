@@ -4,6 +4,8 @@ android/build/
 signing/*.keystore
 *.apk
 *.idsig
+# 装机验证时的截图与放大图，只在本地看
+/.tmp/
 
 # 日志与编辑器
 *.log

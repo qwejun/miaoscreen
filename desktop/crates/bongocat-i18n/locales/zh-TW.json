@@ -431,7 +431,7 @@
         }
       },
       "band": {
-        "label": "資訊條高度（像素）"
+        "label": "資訊區高度（像素，滿屏即浮層）"
       },
       "clock": {
         "label": "時間格式"
@@ -440,7 +440,10 @@
         "label": "日期格式"
       },
       "banner": {
-        "label": "標語"
+        "label": "標語",
+        "random": {
+          "label": "隨機正能量標語"
+      }
       },
       "preview": {
         "title": "預覽",

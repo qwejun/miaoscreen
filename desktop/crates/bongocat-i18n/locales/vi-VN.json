@@ -431,7 +431,7 @@
         }
       },
       "band": {
-        "label": "Chiều cao thanh (pixel)"
+        "label": "Chiều cao vùng thông tin (pixel, toàn màn hình = lớp phủ)"
       },
       "clock": {
         "label": "Định dạng giờ"
@@ -440,7 +440,10 @@
         "label": "Định dạng ngày"
       },
       "banner": {
-        "label": "Nội dung khẩu hiệu"
+        "label": "Nội dung khẩu hiệu",
+        "random": {
+          "label": "Lời cổ vũ ngẫu nhiên"
+      }
       },
       "preview": {
         "title": "Xem trước",

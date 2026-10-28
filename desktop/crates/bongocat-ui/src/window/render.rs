@@ -596,91 +596,6 @@ impl Render for SettingsView {
                             SettingItem::new(
                                 bongocat_i18n::text(
                                     language.catalog_locale(),
-                                    "settings.device_screen.band.label",
-                                ),
-                                SettingField::number_input(
-                                    NumberFieldOptions {
-                                        min: 0.0,
-                                        max: 240.0,
-                                        step: 8.0,
-                                    },
-                                    {
-                                        let view = view_entity.clone();
-                                        move |app| f64::from(view.read(app).device_config().band_px)
-                                    },
-                                    {
-                                        let view = view_entity.clone();
-                                        move |value: f64, app: &mut App| {
-                                            let band = value.round().clamp(0.0, 240.0) as u32;
-                                            view.update(app, |view, cx| {
-                                                view.update_device_config(
-                                                    |config| config.band_px = band,
-                                                    cx,
-                                                );
-                                            });
-                                        }
-                                    },
-                                ),
-                            ),
-                            SettingItem::new(
-                                bongocat_i18n::text(
-                                    language.catalog_locale(),
-                                    "settings.device_screen.clock.label",
-                                ),
-                                SettingField::input(
-                                    {
-                                        let view = view_entity.clone();
-                                        move |app| {
-                                            SharedString::from(
-                                                view.read(app).device_config().clock.clone(),
-                                            )
-                                        }
-                                    },
-                                    {
-                                        let view = view_entity.clone();
-                                        move |value: SharedString, app: &mut App| {
-                                            let text = value.to_string();
-                                            view.update(app, |view, cx| {
-                                                view.update_device_config(
-                                                    |config| config.clock = text,
-                                                    cx,
-                                                );
-                                            });
-                                        }
-                                    },
-                                ),
-                            ),
-                            SettingItem::new(
-                                bongocat_i18n::text(
-                                    language.catalog_locale(),
-                                    "settings.device_screen.date.label",
-                                ),
-                                SettingField::input(
-                                    {
-                                        let view = view_entity.clone();
-                                        move |app| {
-                                            SharedString::from(
-                                                view.read(app).device_config().date.clone(),
-                                            )
-                                        }
-                                    },
-                                    {
-                                        let view = view_entity.clone();
-                                        move |value: SharedString, app: &mut App| {
-                                            let text = value.to_string();
-                                            view.update(app, |view, cx| {
-                                                view.update_device_config(
-                                                    |config| config.date = text,
-                                                    cx,
-                                                );
-                                            });
-                                        }
-                                    },
-                                ),
-                            ),
-                            SettingItem::new(
-                                bongocat_i18n::text(
-                                    language.catalog_locale(),
                                     "settings.device_screen.banner.label",
                                 ),
                                 SettingField::input(
@@ -699,6 +614,29 @@ impl Render for SettingsView {
                                             view.update(app, |view, cx| {
                                                 view.update_device_config(
                                                     |config| config.banner = text,
+                                                    cx,
+                                                );
+                                            });
+                                        }
+                                    },
+                                ),
+                            ),
+                            SettingItem::new(
+                                bongocat_i18n::text(
+                                    language.catalog_locale(),
+                                    "settings.device_screen.banner.random.label",
+                                ),
+                                SettingField::switch(
+                                    {
+                                        let view = view_entity.clone();
+                                        move |app| view.read(app).device_config().banner_random
+                                    },
+                                    {
+                                        let view = view_entity.clone();
+                                        move |value: bool, app: &mut App| {
+                                            view.update(app, |view, cx| {
+                                                view.update_device_config(
+                                                    |config| config.banner_random = value,
                                                     cx,
                                                 );
                                             });

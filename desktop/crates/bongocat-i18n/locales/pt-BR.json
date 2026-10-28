@@ -431,7 +431,7 @@
         }
       },
       "band": {
-        "label": "Altura da faixa (pixels)"
+        "label": "Altura da área de informações (px, tela cheia = sobreposição)"
       },
       "clock": {
         "label": "Formato da hora"
@@ -440,7 +440,10 @@
         "label": "Formato da data"
       },
       "banner": {
-        "label": "Texto do banner"
+        "label": "Texto do banner",
+        "random": {
+          "label": "Encorajamento aleatório"
+      }
       },
       "preview": {
         "title": "Prévia",

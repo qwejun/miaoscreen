@@ -431,7 +431,7 @@
         }
       },
       "band": {
-        "label": "Strip height (pixels)"
+        "label": "Info area height (px, full screen = overlay)"
       },
       "clock": {
         "label": "Clock format"
@@ -440,7 +440,10 @@
         "label": "Date format"
       },
       "banner": {
-        "label": "Banner text"
+        "label": "Banner text",
+        "random": {
+          "label": "Random encouragement"
+      }
       },
       "preview": {
         "title": "Preview",

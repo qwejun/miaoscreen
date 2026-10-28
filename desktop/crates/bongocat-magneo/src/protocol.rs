@@ -229,11 +229,22 @@ pub fn parse_preview_frame(payload: &[u8]) -> Option<&[u8]> {
 }
 
 /// Where a band line sits horizontally.
+///
+/// `Card` is not an edge but a home: the panel keeps a note-sized rectangle
+/// pinned inside the upper-left arc, and a line marked `Card` is placed against
+/// that rectangle's left padding instead of against the circle's chord. Its
+/// `center_y` then counts from the top of the card rather than from the top of
+/// the band, which is what lets the clock and the date share one block.
+///
+/// The card is a layer-only device: it lives where the panel is wide, and a
+/// short band at the bottom of a circle has no room for it. A panel that draws
+/// a bar instead of a layer therefore falls back to left-aligned text.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Align {
     Left,
     Center,
     Right,
+    Card,
 }
 
 /// How heavy a band line is drawn.
@@ -261,6 +272,10 @@ const fn align_code(align: Align) -> u8 {
         Align::Left => 0,
         Align::Center => 1,
         Align::Right => 2,
+        // Appended rather than inserted: codes 0..=2 keep meaning what they
+        // meant, so a panel built before the card existed still draws these
+        // lines, just centred — it reads `3` as its default arm.
+        Align::Card => 3,
     }
 }
 
@@ -317,53 +332,69 @@ impl Overlay {
         self.band_px > 0 && !self.lines.is_empty()
     }
 
-    /// The strip a publisher shows when nobody configured one: a large clock,
-    /// the date under it and the user's banner at the bottom.
+    /// The strip a publisher shows when nobody configured one: the clock and
+    /// the date on a card in the upper left, and the user's banner at the very
+    /// bottom of the panel.
     ///
-    /// The line positions are relative to the top of the band, and the band is
-    /// deliberately taller than the black the 1.72:1 canvas leaves below the
-    /// picture: the panel fades the upper part of it into the artwork, so the
-    /// clock has to sit below that fade. Colour values are `0xAARRGGBB` ints
-    /// because that is exactly what an Android `Color` int is, so the device can
-    /// feed them straight to a `Paint`.
+    /// The band is deliberately taller than the black the 1.72:1 canvas leaves
+    /// below the picture, because the panel reads anything past six tenths of
+    /// the surface as a layer over the whole picture rather than as a bar under
+    /// it. Everything here is therefore a screen coordinate on an 800px panel,
+    /// read from the top: with a full-surface band the panel's own
+    /// `viewHeight - bandHeight + center_y` collapses to `center_y`.
+    ///
+    /// Colour values are `0xAARRGGBB` ints because that is exactly what an
+    /// Android `Color` int is, so the device can feed them straight to a
+    /// `Paint`.
     pub fn default_strip() -> Overlay {
         Overlay {
-            // Tall enough to reach up over the bottom of the picture, which is
-            // what lets the panel fade it in instead of butting a black bar
-            // against the artwork. The panel only pushes the picture up by the
-            // part of this that would cover it, and at this height that is a
-            // few pixels — the strip reads as the desk falling into shadow
-            // rather than as a separate band.
-            band_px: 180,
+            // A band this tall is not a band: the panel treats anything past
+            // six tenths of the surface as a layer over the whole picture
+            // rather than as a bar under it. That is the point — the empty part
+            // of this panel is not the bottom, where the circle narrows to
+            // nothing and a line of text has to shrink to fit, but the black
+            // above the cat, which is wide and holds nothing at all.
+            band_px: 800,
             background: 0xFF00_0000,
             divider: false,
             lines: vec![
+                // Time and date share one card, so they are placed against the
+                // card rather than against the circle: dark on white, both
+                // centred in it, and stacked tightly enough to read as a single
+                // object rather than as two labels.
                 OverlayLine {
                     text: "{HH}:{mm}".to_owned(),
-                    size_px: 50,
-                    color: 0xFFFF_FFFF,
-                    align: Align::Center,
+                    size_px: 36,
+                    color: 0xFF11_1114,
+                    align: Align::Card,
                     weight: Weight::Bold,
-                    font: Font::Mono,
-                    center_y: 62.0,
+                    font: Font::Rounded,
+                    center_y: 58.0,
                 },
                 OverlayLine {
-                    text: "{yyyy}-{MM}-{dd} {W}".to_owned(),
-                    size_px: 15,
-                    color: 0xFF9A_A0A6,
-                    align: Align::Center,
+                    text: "{MM}-{dd} {W}".to_owned(),
+                    size_px: 13,
+                    color: 0xFF8A_8F98,
+                    align: Align::Card,
                     weight: Weight::Regular,
-                    font: Font::System,
-                    center_y: 110.0,
+                    font: Font::Rounded,
+                    center_y: 88.0,
                 },
+                // Alone at the bottom, in the middle of the black the picture
+                // leaves rather than on its last row: sitting further up puts
+                // the line on a wide chord, so it needs neither shrinking nor
+                // an inset, and it stops looking pinned to the bezel. The card
+                // above and the banner below put the cat between two anchors
+                // instead of stacking everything into the part of the panel
+                // with the least room.
                 OverlayLine {
                     text: "今天也要加油".to_owned(),
-                    size_px: 18,
+                    size_px: 30,
                     color: 0xFFE8_EAED,
                     align: Align::Center,
                     weight: Weight::Regular,
                     font: Font::Rounded,
-                    center_y: 150.0,
+                    center_y: 712.0,
                 },
             ],
         }
