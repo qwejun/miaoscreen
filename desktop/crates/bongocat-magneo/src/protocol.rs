@@ -16,7 +16,8 @@ use bongocat_render::{
     legacy_key_overlay_bounds,
 };
 use std::io;
-use std::path::Path;
+
+use super::downscale::{AssetCache, ScalePlan};
 
 pub const PROTOCOL_VERSION: u32 = 1;
 
@@ -483,11 +484,19 @@ pub fn overlay(config: &Overlay) -> Vec<u8> {
 /// image size: [`legacy_key_overlay_bounds`] offsets a legacy BongoCatMver image
 /// by the margin its authoring window added, and that rule belongs on this side
 /// of the wire, where the canvas is known, rather than repeated by every client.
-pub fn resources(
+///
+/// Sizes are the sizes the panel will decode to, not the sizes on disk: an atlas
+/// too large for the panel's heap is shrunk first (see [`super::downscale`]), and
+/// the declaration has to describe what actually travels. The key quads keep
+/// their bounds either way — those are model-space, and a smaller image is drawn
+/// into the same rectangle.
+pub(crate) fn resources(
     generation: u64,
     resources: &RenderResources,
     canvas: CanvasInfo,
+    cache: &AssetCache,
 ) -> io::Result<Vec<u8>> {
+    let plan = ScalePlan::for_resources(resources);
     let mut writer = Writer::new();
     writer.u32(PROTOCOL_VERSION);
     writer.u64(generation);
@@ -503,52 +512,43 @@ pub fn resources(
 
     match &resources.background {
         Some(asset) => {
-            let bytes = read_asset(&asset.path)?;
+            let fitted = cache.scaled(&asset.path, plan, asset.width, asset.height)?;
             writer.u8(1);
-            writer.u32(asset.width);
-            writer.u32(asset.height);
-            writer.u32(u32::try_from(bytes.len()).unwrap_or(u32::MAX));
-            writer.raw(&bytes);
+            writer.u32(fitted.width);
+            writer.u32(fitted.height);
+            writer.u32(u32::try_from(fitted.bytes.len()).unwrap_or(u32::MAX));
+            writer.raw(&fitted.bytes);
         }
         None => writer.u8(0),
     }
 
     writer.u32(u32::try_from(resources.textures.len()).unwrap_or(u32::MAX));
     for asset in &resources.textures {
-        let bytes = read_asset(&asset.path)?;
+        let fitted = cache.scaled(&asset.path, plan, asset.width, asset.height)?;
         writer.u32(u32::try_from(asset.id.index()).unwrap_or(u32::MAX));
-        writer.u32(asset.width);
-        writer.u32(asset.height);
-        writer.u32(u32::try_from(bytes.len()).unwrap_or(u32::MAX));
-        writer.raw(&bytes);
+        writer.u32(fitted.width);
+        writer.u32(fitted.height);
+        writer.u32(u32::try_from(fitted.bytes.len()).unwrap_or(u32::MAX));
+        writer.raw(&fitted.bytes);
     }
 
     writer.u32(u32::try_from(resources.key_assets.len()).unwrap_or(u32::MAX));
     for asset in &resources.key_assets {
-        let bytes = read_asset(&asset.path)?;
+        let fitted = cache.scaled(&asset.path, plan, asset.width, asset.height)?;
         let bounds = legacy_key_overlay_bounds(canvas_bounds, asset.width, asset.height);
         writer.u32(u32::try_from(asset.id.index()).unwrap_or(u32::MAX));
         writer.u8(side_code(asset.side));
-        writer.u32(asset.width);
-        writer.u32(asset.height);
+        writer.u32(fitted.width);
+        writer.u32(fitted.height);
         writer.f32(bounds.min_x);
         writer.f32(bounds.max_x);
         writer.f32(bounds.min_y);
         writer.f32(bounds.max_y);
-        writer.u32(u32::try_from(bytes.len()).unwrap_or(u32::MAX));
-        writer.raw(&bytes);
+        writer.u32(u32::try_from(fitted.bytes.len()).unwrap_or(u32::MAX));
+        writer.raw(&fitted.bytes);
     }
 
     Ok(writer.message(KIND_RESOURCES))
-}
-
-fn read_asset(path: &Path) -> io::Result<Vec<u8>> {
-    std::fs::read(path).map_err(|error| {
-        io::Error::new(
-            error.kind(),
-            format!("could not read {}: {error}", path.display()),
-        )
-    })
 }
 
 /// One evaluated frame.

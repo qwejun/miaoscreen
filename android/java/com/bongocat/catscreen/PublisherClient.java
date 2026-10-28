@@ -672,6 +672,26 @@ final class PublisherClient implements Runnable, UdpFrameChannel.Sink {
         }
     }
 
+    /** Decoded bytes one image may ask for before it is read at a fraction. */
+    private static final int MAX_DECODED_BYTES = 16 * 1024 * 1024;
+
+    /**
+     * The power-of-two sample that brings a declared image inside the heap.
+     *
+     * <p>A host that fits its textures before sending never trips this: the
+     * biggest atlas it announces decodes to a few megabytes. The guard is for a
+     * host that does not, where an 8192² atlas is 268 MB once decoded and used to
+     * take the whole link down instead of the one texture that caused it.
+     */
+    private static int sampleFor(int width, int height) {
+        int sample = 1;
+        while (sample < 32
+                && (long) (width / sample) * (height / sample) * 4L > MAX_DECODED_BYTES) {
+            sample *= 2;
+        }
+        return sample;
+    }
+
     private Scene readScene(Protocol.Reader reader) throws IOException {
         reader.u32();
         Scene scene = new Scene();
@@ -685,7 +705,7 @@ final class PublisherClient implements Runnable, UdpFrameChannel.Sink {
             int width = reader.u32();
             int height = reader.u32();
             int size = reader.u32();
-            scene.background = decode(reader, size, width, height, "background");
+            scene.background = tryDecode(reader, size, width, height, "background");
         }
 
         int textures = reader.bounded(Scene.MAX_TEXTURES);
@@ -696,7 +716,7 @@ final class PublisherClient implements Runnable, UdpFrameChannel.Sink {
             int width = reader.u32();
             int height = reader.u32();
             int size = reader.u32();
-            scene.textureImages[i] = decode(reader, size, width, height, "texture " + i);
+            scene.textureImages[i] = tryDecode(reader, size, width, height, "texture " + i);
         }
 
         int keys = reader.bounded(Scene.MAX_KEYS);
@@ -714,10 +734,31 @@ final class PublisherClient implements Runnable, UdpFrameChannel.Sink {
             scene.keyBounds[i * 4 + 2] = reader.f32();
             scene.keyBounds[i * 4 + 3] = reader.f32();
             int size = reader.u32();
-            scene.keyImages[i] = decode(reader, size, width, height, "key " + i);
+            scene.keyImages[i] = tryDecode(reader, size, width, height, "key " + i);
         }
 
         return scene;
+    }
+
+    /**
+     * Decodes one image, treating a failure as a missing picture rather than a
+     * dead link.
+     *
+     * <p>The reader has to advance past the bytes either way — they were read off
+     * the socket before this was called — and the scene already tolerates a null
+     * image, which is exactly what a skipped texture is: drawables that name it
+     * fall back to the blank texture instead of the connection.
+     */
+    private static Bitmap tryDecode(
+            Protocol.Reader reader, int size, int width, int height, String what) {
+        try {
+            return decode(reader, size, width, height, what);
+        } catch (OutOfMemoryError error) {
+            Log.w(TAG, what + " too large to decode; skipping it: " + error.getMessage());
+        } catch (IOException error) {
+            Log.w(TAG, what + " could not be decoded; skipping it: " + error.getMessage());
+        }
+        return null;
     }
 
     private static Bitmap decode(
@@ -726,10 +767,34 @@ final class PublisherClient implements Runnable, UdpFrameChannel.Sink {
         BitmapFactory.Options options = new BitmapFactory.Options();
         options.inPreferredConfig = Bitmap.Config.ARGB_8888;
         options.inScaled = false;
-        Bitmap bitmap = BitmapFactory.decodeByteArray(reader.buffer(), reader.position(), size, options);
-        reader.advance(size);
+        options.inSampleSize = sampleFor(width, height);
+        Bitmap bitmap;
+        try {
+            bitmap = BitmapFactory.decodeByteArray(
+                    reader.buffer(), reader.position(), size, options);
+        } finally {
+            // The bytes were consumed off the socket before the decode started;
+            // whatever happened to the bitmap, the next field starts after them.
+            reader.advance(size);
+        }
         if (bitmap == null) {
             throw new IOException("could not decode " + what);
+        }
+        if (options.inSampleSize > 1) {
+            // A sampled decode is deliberately smaller than the declaration; the
+            // renderer works from normalized UVs, so the reduced image draws into
+            // the same rectangle. Only the upper bound is checked, so a decoder
+            // rounding differently does not turn into a dropped texture.
+            if (bitmap.getWidth() > width || bitmap.getHeight() > height) {
+                int actualWidth = bitmap.getWidth();
+                int actualHeight = bitmap.getHeight();
+                bitmap.recycle();
+                throw new IOException(what + " is " + actualWidth + "x" + actualHeight
+                        + ", expected at most " + width + "x" + height);
+            }
+            Log.i(TAG, what + " decoded at " + bitmap.getWidth() + "x" + bitmap.getHeight()
+                    + " (declared " + width + "x" + height + ")");
+            return bitmap;
         }
         if (bitmap.getWidth() != width || bitmap.getHeight() != height) {
             int actualWidth = bitmap.getWidth();

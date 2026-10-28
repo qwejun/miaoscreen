@@ -42,6 +42,7 @@ use std::{
 
 use bongocat_render::{FrameSink, FrameSinkError, RenderFrame};
 
+use crate::downscale::AssetCache;
 use crate::protocol;
 
 /// How long the worker waits in `accept` before it looks for a closed sink.
@@ -326,6 +327,11 @@ struct Shared {
     wake: Condvar,
     audio: Mutex<AudioState>,
     udp: Mutex<Option<Arc<UdpLink>>>,
+    /// Textures already fitted to the panel, kept across connections.
+    ///
+    /// A resample of an 8192² atlas costs a second of CPU; a panel that
+    /// reconnects after a cable wobble should not pay it again.
+    assets: AssetCache,
     /// Whether a panel is on the socket right now.
     ///
     /// The settings page shows this, so it has to be readable without touching
@@ -922,7 +928,7 @@ fn serve(mut stream: TcpStream, peer: SocketAddr, shared: &Arc<Shared>) -> bool 
 
         // Textures only ever travel on the control socket: they are megabytes,
         // sent once, and a lost one costs a whole model rather than a frame.
-        if sent.ensure_resources(&mut stream, frame).is_err() {
+        if sent.ensure_resources(&mut stream, frame, &shared.assets).is_err() {
             return false;
         }
         // A still picture has nothing to send, and a control socket that stays
@@ -974,7 +980,7 @@ fn serve(mut stream: TcpStream, peer: SocketAddr, shared: &Arc<Shared>) -> bool 
                 }
             }
             _ => {
-                if sent.write_frame(&mut stream, frame).is_err() {
+                if sent.write_frame(&mut stream, frame, &shared.assets).is_err() {
                     return false;
                 }
             }
@@ -1015,7 +1021,12 @@ impl SentState {
     }
 
     /// Sends the textures if this is the first frame of a model generation.
-    fn ensure_resources(&mut self, stream: &mut TcpStream, frame: &RenderFrame) -> io::Result<()> {
+    fn ensure_resources(
+        &mut self,
+        stream: &mut TcpStream,
+        frame: &RenderFrame,
+        cache: &AssetCache,
+    ) -> io::Result<()> {
         if self.generation == Some(frame.model_generation) {
             return Ok(());
         }
@@ -1023,6 +1034,7 @@ impl SentState {
             frame.model_generation,
             &frame.resources,
             frame.snapshot.canvas,
+            cache,
         )?)?;
         self.generation = Some(frame.model_generation);
         // A new generation means the panel reloaded its textures; the frame
@@ -1032,8 +1044,13 @@ impl SentState {
         Ok(())
     }
 
-    fn write_frame(&mut self, stream: &mut TcpStream, frame: &RenderFrame) -> io::Result<()> {
-        self.ensure_resources(stream, frame)?;
+    fn write_frame(
+        &mut self,
+        stream: &mut TcpStream,
+        frame: &RenderFrame,
+        cache: &AssetCache,
+    ) -> io::Result<()> {
+        self.ensure_resources(stream, frame, cache)?;
         if self.frame_number != Some(frame.frame_number) {
             stream.write_all(&protocol::frame(
                 frame.model_generation,

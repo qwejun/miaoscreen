@@ -22,6 +22,10 @@ bongocat-model.workspace = true
 bongocat-platform.workspace = true
 bongocat-render.workspace = true
 bongocat-runtime.workspace = true
+image.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
 
 [lints]
 workspace = true

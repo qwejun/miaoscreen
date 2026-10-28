@@ -16,5 +16,9 @@
 
 pub mod protocol;
 
+mod downscale;
 mod sink;
 pub use sink::{MagneoSink, MagneoHandle};
+
+#[cfg(test)]
+mod tests;

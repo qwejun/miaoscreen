@@ -922,6 +922,8 @@ dependencies = [
  "bongocat-platform",
  "bongocat-render",
  "bongocat-runtime",
+ "image",
+ "tempfile",
 ]
 
 [[package]]
