@@ -441,6 +441,7 @@
       },
       "banner": {
         "label": "Nội dung khẩu hiệu",
+        "label_random": "Nội dung khẩu hiệu (khi bật ngẫu nhiên, màn hình tự chọn một câu trong danh sách mỗi giờ)",
         "random": {
           "label": "Lời cổ vũ ngẫu nhiên"
         },

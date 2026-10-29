@@ -17,7 +17,7 @@ use bongocat_render::{
 };
 use std::io;
 
-use super::downscale::{AssetCache, ScalePlan};
+use super::downscale::{AssetCache, ResourcePlans};
 
 pub const PROTOCOL_VERSION: u32 = 1;
 
@@ -505,7 +505,7 @@ pub(crate) fn resources(
     canvas: CanvasInfo,
     cache: &AssetCache,
 ) -> io::Result<Vec<u8>> {
-    let plan = ScalePlan::for_resources(resources);
+    let plans = ResourcePlans::for_resources(resources);
     let mut writer = Writer::new();
     writer.u32(PROTOCOL_VERSION);
     writer.u64(generation);
@@ -521,7 +521,7 @@ pub(crate) fn resources(
 
     match &resources.background {
         Some(asset) => {
-            let fitted = cache.scaled(&asset.path, plan, asset.width, asset.height)?;
+            let fitted = cache.scaled(&asset.path, plans.background, asset.width, asset.height)?;
             writer.u8(1);
             writer.u32(fitted.width);
             writer.u32(fitted.height);
@@ -533,7 +533,7 @@ pub(crate) fn resources(
 
     writer.u32(u32::try_from(resources.textures.len()).unwrap_or(u32::MAX));
     for asset in &resources.textures {
-        let fitted = cache.scaled(&asset.path, plan, asset.width, asset.height)?;
+        let fitted = cache.scaled(&asset.path, plans.atlas, asset.width, asset.height)?;
         writer.u32(u32::try_from(asset.id.index()).unwrap_or(u32::MAX));
         writer.u32(fitted.width);
         writer.u32(fitted.height);
@@ -543,7 +543,7 @@ pub(crate) fn resources(
 
     writer.u32(u32::try_from(resources.key_assets.len()).unwrap_or(u32::MAX));
     for asset in &resources.key_assets {
-        let fitted = cache.scaled(&asset.path, plan, asset.width, asset.height)?;
+        let fitted = cache.scaled(&asset.path, plans.keys, asset.width, asset.height)?;
         let bounds = legacy_key_overlay_bounds(canvas_bounds, asset.width, asset.height);
         writer.u32(u32::try_from(asset.id.index()).unwrap_or(u32::MAX));
         writer.u8(side_code(asset.side));

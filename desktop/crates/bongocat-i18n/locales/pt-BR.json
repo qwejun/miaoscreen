@@ -441,6 +441,7 @@
       },
       "banner": {
         "label": "Texto do banner",
+        "label_random": "Texto do banner (com o aleatório ligado, a tela escolhe uma frase das listas a cada hora)",
         "random": {
           "label": "Encorajamento aleatório"
         },

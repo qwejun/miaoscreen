@@ -441,6 +441,7 @@
       },
       "banner": {
         "label": "Texte du bandeau",
+        "label_random": "Texte du bandeau (avec l'aléatoire, l'écran choisit une phrase dans les listes chaque heure)",
         "random": {
           "label": "Encouragement aléatoire"
         },

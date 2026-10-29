@@ -41,6 +41,31 @@ use bongocat_render::RenderResources;
 /// driver's copies.
 pub(crate) const PANEL_PIXEL_BUDGET: u64 = 24 * 1024 * 1024;
 
+/// Decoded bytes the key images may take, held apart from the atlas.
+///
+/// They are whole-canvas pictures with one lit key on each, so most of every one
+/// is transparent — but the panel decodes them at full size all the same, and a
+/// model with sixty of them outweighs its own atlas. Eight megabytes is room for
+/// sixty at 153 px, which is a keyboard three times the size of the one on
+/// screen, and it is a ceiling rather than an allocation: a model with four keys
+/// spends almost nothing and the atlas keeps the rest.
+pub(crate) const KEY_PIXEL_BUDGET: u64 = 8 * 1024 * 1024;
+
+/// Decoded bytes the background image may take, held apart from the atlas.
+///
+/// The background is the one asset drawn at very nearly the panel's own size: the
+/// skin authors size it to the panel and the client fits it by width, so 612 px
+/// of source lands on roughly 700 px of glass. It therefore has to travel at the
+/// size it was drawn at — while the atlas it used to be weighed with is sampled
+/// far below 1:1, because one atlas texel is worth a fraction of a screen pixel.
+///
+/// Sharing a factor made the cat sharp and the keyboard under it soft: the atlas
+/// needed a 2× reduction to fit, and the background was dragged down with it, so
+/// the one image that is viewed at 1:1 was halved and stretched back up. Four
+/// megabytes keeps any reasonable background at native size (a full 800² quad is
+/// 2.6 MB) and still brings an oversized 1920×1080 one down one step.
+pub(crate) const BACKGROUND_PIXEL_BUDGET: u64 = 4 * 1024 * 1024;
+
 /// The largest texture the panel's GPU accepts in either direction.
 pub(crate) const PANEL_MAX_DIMENSION: u32 = 4096;
 
@@ -66,23 +91,6 @@ pub(crate) struct ScalePlan {
 }
 
 impl ScalePlan {
-    /// The smallest reduction that brings this model inside the panel's budget.
-    ///
-    /// The whole set is weighed together rather than each asset against its own
-    /// limit: a model with two 8192² atlases has to give up twice the detail of
-    /// one with a single atlas to stay under the same heap.
-    pub(crate) fn for_resources(resources: &RenderResources) -> Self {
-        let mut reduction = 1;
-        while reduction < MAX_REDUCTION {
-            let candidate = Self { reduction };
-            if candidate.fits(resources) {
-                break;
-            }
-            reduction *= 2;
-        }
-        Self { reduction }
-    }
-
     /// Whether this model already fits and nothing has to be touched.
     pub(crate) fn is_identity(self) -> bool {
         self.reduction == 1
@@ -103,17 +111,89 @@ impl ScalePlan {
         (reduce(width), reduce(height))
     }
 
-    fn fits(self, resources: &RenderResources) -> bool {
+    /// What `sizes` decode to under this plan.
+    fn decoded(self, sizes: impl Iterator<Item = (u32, u32)>) -> u64 {
         let mut total = 0_u64;
-        for (width, height) in source_sizes(resources) {
+        for (width, height) in sizes {
+            let (width, height) = self.dimensions(width, height);
+            total = total.saturating_add(u64::from(width) * u64::from(height) * 4);
+        }
+        total
+    }
+
+    /// Whether `sizes` fit `budget` under this plan, on both counts: bytes and
+    /// the largest dimension the panel's GPU accepts.
+    fn fits(self, sizes: impl Iterator<Item = (u32, u32)>, budget: u64) -> bool {
+        let mut total = 0_u64;
+        for (width, height) in sizes {
             let (width, height) = self.dimensions(width, height);
             if width > PANEL_MAX_DIMENSION || height > PANEL_MAX_DIMENSION {
                 return false;
             }
             total = total.saturating_add(u64::from(width) * u64::from(height) * 4);
         }
-        total <= PANEL_PIXEL_BUDGET
+        total <= budget
     }
+}
+
+/// The three factors one model travels with.
+///
+/// The atlas and the key images are weighed apart because they are not worth the
+/// same. A model's atlas is the cat; its key images are sixty copies of the whole
+/// canvas with one key lit on each. Sharing a single budget let the keyboard
+/// outbid the cat — sixty images at 612×354 decode to 52 MB — so a 4096² atlas
+/// had to come down to 1024², a quarter of its width, and the picture went soft
+/// on a panel where the cat fills the screen and a key is a fingertip.
+///
+/// The background is apart from both for the opposite reason: it is the only
+/// asset sampled at about 1:1, so it is the only one where a reduction is visible
+/// as blur rather than as headroom recovered. See [`BACKGROUND_PIXEL_BUDGET`].
+///
+/// Giving the keys their own smaller ceiling keeps them legible and hands the
+/// rest to the atlas, which is what the eye is actually on.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) struct ResourcePlans {
+    pub(crate) atlas: ScalePlan,
+    pub(crate) keys: ScalePlan,
+    pub(crate) background: ScalePlan,
+}
+
+impl ResourcePlans {
+    /// The smallest step each group can take and still fit.
+    ///
+    /// Keys and the background are fitted first, at their own budgets, and the
+    /// atlas works with whatever they left over: the picture is the last thing to
+    /// lose detail.
+    pub(crate) fn for_resources(resources: &RenderResources) -> Self {
+        let keys = smallest_fit(
+            resources.key_assets.iter().map(|a| (a.width, a.height)),
+            KEY_PIXEL_BUDGET,
+        );
+        let background = smallest_fit(
+            background_sizes(resources),
+            BACKGROUND_PIXEL_BUDGET,
+        );
+        let spent = keys.decoded(resources.key_assets.iter().map(|a| (a.width, a.height)))
+            + background.decoded(background_sizes(resources));
+        let atlas = smallest_fit(
+            texture_sizes(resources),
+            PANEL_PIXEL_BUDGET.saturating_sub(spent),
+        );
+        Self {
+            atlas,
+            keys,
+            background,
+        }
+    }
+}
+
+/// The smallest power-of-two reduction that brings `sizes` inside `budget`.
+fn smallest_fit(sizes: impl Iterator<Item = (u32, u32)> + Clone, budget: u64) -> ScalePlan {
+    let mut plan = ScalePlan { reduction: 1 };
+    while plan.reduction < MAX_REDUCTION && !plan.fits(sizes.clone(), budget) {
+        plan.reduction *= 2;
+    }
+    plan
 }
 
 /// One asset as it is about to travel: the bytes, and the size they decode to.
@@ -242,12 +322,12 @@ fn resample(bytes: &[u8], path: &Path, plan: ScalePlan) -> io::Result<(Vec<u8>, 
     Ok((encoded, width, height))
 }
 
-/// Every asset's size on disk, in the order the resource message sends them.
-fn source_sizes(resources: &RenderResources) -> impl Iterator<Item = (u32, u32)> + '_ {
-    resources
-        .background
-        .iter()
-        .map(|asset| (asset.width, asset.height))
-        .chain(resources.textures.iter().map(|a| (a.width, a.height)))
-        .chain(resources.key_assets.iter().map(|a| (a.width, a.height)))
+/// Every atlas's size on disk, in the order the resource message sends them.
+fn texture_sizes(resources: &RenderResources) -> impl Iterator<Item = (u32, u32)> + Clone + '_ {
+    resources.textures.iter().map(|a| (a.width, a.height))
+}
+
+/// The background's size on disk, if the model has one.
+fn background_sizes(resources: &RenderResources) -> impl Iterator<Item = (u32, u32)> + Clone + '_ {
+    resources.background.iter().map(|a| (a.width, a.height))
 }

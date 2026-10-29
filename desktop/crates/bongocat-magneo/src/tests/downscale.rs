@@ -8,7 +8,9 @@ use std::sync::Arc;
 use bongocat_render::{BackgroundAsset, CanvasInfo, RenderResources, TextureAsset};
 use tempfile::TempDir;
 
-use crate::downscale::{PANEL_MAX_DIMENSION, AssetCache, ScalePlan};
+use crate::downscale::{
+    BACKGROUND_PIXEL_BUDGET, PANEL_MAX_DIMENSION, AssetCache, ResourcePlans, ScalePlan,
+};
 use crate::protocol;
 
 /// A texture asset pointing at `path`, declared at `width`×`height`.
@@ -37,7 +39,7 @@ fn the_built_in_models_need_no_reduction() {
             height: 354,
         }),
     };
-    let plan = ScalePlan::for_resources(&resources);
+    let plan = ResourcePlans::for_resources(&resources).atlas;
     assert!(plan.is_identity(), "built-in sizes must travel unchanged");
 }
 
@@ -54,7 +56,7 @@ fn a_single_huge_atlas_is_reduced_to_2048() {
             height: 1400,
         }),
     };
-    let plan = ScalePlan::for_resources(&resources);
+    let plan = ResourcePlans::for_resources(&resources).atlas;
     assert_eq!(plan.dimensions(8192, 8192), (2048, 2048));
     assert_eq!(plan.dimensions(1400, 1400), (350, 350));
 }
@@ -74,8 +76,95 @@ fn two_huge_atlases_reduce_to_1024() {
             height: 1400,
         }),
     };
-    let plan = ScalePlan::for_resources(&resources);
+    let plan = ResourcePlans::for_resources(&resources).atlas;
     assert_eq!(plan.dimensions(8192, 8192), (1024, 1024));
+}
+
+/// Sixty key images must not drag the cat down with them.
+///
+/// A keyboard skin ships one whole-canvas picture per key, with a single key lit
+/// on each: sixty of them at 612×354 decode to 52 MB, which outweighed the atlas
+/// and pushed a 4096² picture down to 1024² — a quarter of its width, and the
+/// reason such a skin looked soft. The keys take their own ceiling now and the
+/// atlas keeps 2048².
+#[test]
+fn a_keyboard_of_key_images_does_not_shrink_the_atlas() {
+    let resources = RenderResources {
+        textures: vec![texture(PathBuf::from("a.png"), 4096, 4096, 0)],
+        key_assets: (0..60)
+            .map(|index| bongocat_render::KeyAsset {
+                id: bongocat_render::KeyAssetId::new(index),
+                side: bongocat_render::KeySide::Left,
+                name: format!("Key{index}"),
+                path: PathBuf::from(format!("k{index}.png")),
+                width: 612,
+                height: 354,
+            })
+            .collect(),
+        background: Some(BackgroundAsset {
+            path: PathBuf::from("bg.png"),
+            width: 612,
+            height: 354,
+        }),
+    };
+
+    let plans = ResourcePlans::for_resources(&resources);
+    assert_eq!(
+        plans.atlas.dimensions(4096, 4096),
+        (2048, 2048),
+        "the cat keeps half its width instead of a quarter"
+    );
+    assert!(
+        plans.keys.dimensions(612, 354).0 <= 256,
+        "the keys stay small; they are a fingertip on the screen"
+    );
+    assert_eq!(
+        plans.background.dimensions(612, 354),
+        (612, 354),
+        "the background is drawn at the panel's own size, so it travels at 1:1"
+    );
+}
+
+/// The background is the one asset a reduction is visible on.
+///
+/// It rides in the resource message next to the atlas, and while the two shared a
+/// factor every atlas that had to halve for the panel's heap took the keyboard
+/// under the cat with it: 612 px of source stretched over 700 px of glass. That
+/// was the whole reason a skin looked soft while its cat looked sharp.
+#[test]
+fn a_shrunk_atlas_does_not_shrink_the_background() {
+    let resources = RenderResources {
+        textures: vec![texture(PathBuf::from("huge.png"), 8192, 8192, 0)],
+        key_assets: Vec::new(),
+        background: Some(BackgroundAsset {
+            path: PathBuf::from("bg.png"),
+            width: 612,
+            height: 354,
+        }),
+    };
+    let plans = ResourcePlans::for_resources(&resources);
+    assert!(!plans.atlas.is_identity(), "this atlas cannot travel as it is");
+    assert_eq!(plans.background.dimensions(612, 354), (612, 354));
+}
+
+/// A background large enough to threaten the panel's heap still comes down.
+#[test]
+fn an_oversized_background_is_still_fitted() {
+    let resources = RenderResources {
+        textures: Vec::new(),
+        key_assets: Vec::new(),
+        background: Some(BackgroundAsset {
+            path: PathBuf::from("photo.png"),
+            width: 1920,
+            height: 1080,
+        }),
+    };
+    let plan = ResourcePlans::for_resources(&resources).background;
+    let (width, height) = plan.dimensions(1920, 1080);
+    assert!(
+        u64::from(width) * u64::from(height) * 4 <= BACKGROUND_PIXEL_BUDGET,
+        "8.3 MB decoded does not belong in a 50 MB heap"
+    );
 }
 
 /// A texture wider than the panel's GPU accepts must come down even when the
@@ -87,7 +176,7 @@ fn the_gpu_limit_is_respected() {
         key_assets: Vec::new(),
         background: None,
     };
-    let plan = ScalePlan::for_resources(&resources);
+    let plan = ResourcePlans::for_resources(&resources).atlas;
     let (width, height) = plan.dimensions(8192, 2048);
     assert!(width <= PANEL_MAX_DIMENSION && height <= PANEL_MAX_DIMENSION);
 }

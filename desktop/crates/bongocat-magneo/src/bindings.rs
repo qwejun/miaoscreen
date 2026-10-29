@@ -27,8 +27,17 @@ pub fn for_model(
     model_id: &str,
     key_images: &KeyImageInventory,
 ) -> InputBindings {
-    let keyboard_model =
-        origin == ModelOrigin::Installed || matches!(model_id, "standard" | "keyboard");
+    // Which keys a model reacts to is decided by what it can draw, not by what
+    // it is called — the same reading the product's own binding table makes.
+    // This crate has no catalog to consult, so the artwork is the whole basis of
+    // the decision: a keyboard skin paints both paws, a standard-mode cat paints
+    // one, and the bundled `standard` is the exception with a full left hand and
+    // nothing on the right.
+    let draws_both_hands = !key_images.names(KeySide::Left).is_empty()
+        && !key_images.names(KeySide::Right).is_empty();
+    let keyboard_model = origin == ModelOrigin::Installed
+        || matches!(model_id, "standard" | "keyboard")
+        || draws_both_hands;
     let mut key_hands = BTreeMap::new();
 
     if keyboard_model {
@@ -57,7 +66,10 @@ pub fn for_model(
         );
     }
 
-    if origin == ModelOrigin::Installed || matches!(model_id, "keyboard" | "gamepad") {
+    if origin == ModelOrigin::Installed
+        || matches!(model_id, "keyboard" | "gamepad")
+        || draws_both_hands
+    {
         for usage in RIGHT_ARROW.hid_usage()..=RIGHT_ARROW_LAST {
             bind_drawable_key(&mut key_hands, usage, HandSide::Right, key_images);
         }
@@ -85,8 +97,18 @@ fn bind_drawable_key(
     side: HandSide,
     key_images: &KeyImageInventory,
 ) {
-    if key_images.can_draw(key_side(side), hid_usage) {
-        key_hands.insert(PhysicalKey::from_hid_usage(hid_usage), side);
+    // The preferred hand when its artwork exists, the other one when only it
+    // does — a skin files each key under the paw that presses it, while the
+    // product table puts the whole main block on the left.
+    let other = match side {
+        HandSide::Left => HandSide::Right,
+        HandSide::Right => HandSide::Left,
+    };
+    let drawn_by = [side, other]
+        .into_iter()
+        .find(|hand| key_images.can_draw(key_side(*hand), hid_usage));
+    if let Some(hand) = drawn_by {
+        key_hands.insert(PhysicalKey::from_hid_usage(hid_usage), hand);
     }
 }
 

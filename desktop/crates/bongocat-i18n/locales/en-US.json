@@ -441,6 +441,7 @@
       },
       "banner": {
         "label": "Banner text",
+        "label_random": "Banner text (with random on, the panel picks a line from the pools every hour)",
         "random": {
           "label": "Random banner"
         },

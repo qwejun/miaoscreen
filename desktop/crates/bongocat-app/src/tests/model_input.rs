@@ -51,6 +51,46 @@ fn installed_models_get_default_keyboard_bindings() {
     assert_eq!(gamepad.hand_for_gamepad(GamepadButton::Select), None);
 }
 
+/// The catalog's declared mode, not the id, decides whether a skin gets the
+/// keyboard table.
+///
+/// Every third-party skin carries an id of its own, so an id comparison against
+/// the two bundled names read all of them as "standard" and bound nothing but A.
+/// The paw moved for A and for nothing else — which is what a keyboard skin with
+/// a whole keyboard of artwork looked like from the outside: broken.
+#[test]
+fn a_catalog_keyboard_skin_binds_the_whole_keyboard() {
+    // `keyboard` stands in for the artwork such a skin ships: the binding table
+    // only ever intersects with the images it is handed, and the mode is the one
+    // thing under test here.
+    let images = shipped_key_images("keyboard");
+    let bindings = input_bindings_for_model(ModelOrigin::Preset, "nalin-keyboard", &images);
+
+    assert_eq!(bindings.hand_for(PhysicalKey::KEY_A), Some(HandSide::Left));
+    assert_eq!(
+        bindings.hand_for(PhysicalKey::from_hid_usage(0x16)),
+        Some(HandSide::Left),
+        "S has to reach the model, not only A"
+    );
+    assert_eq!(
+        bindings.hand_for(PhysicalKey::from_hid_usage(0x2c)),
+        Some(HandSide::Left),
+        "space has to reach the model"
+    );
+    assert_eq!(
+        bindings.hand_for(PhysicalKey::from_hid_usage(0x52)),
+        Some(HandSide::Right),
+        "the arrow cluster stays on the right hand"
+    );
+
+    // A standard-mode skin keeps the old treatment: it ships artwork for A and
+    // is authored to sit still for everything else.
+    let standard_images = shipped_key_images("standard");
+    let standard = input_bindings_for_model(ModelOrigin::Preset, "nalin-standard", &standard_images);
+    assert_eq!(standard.hand_for(PhysicalKey::KEY_A), Some(HandSide::Left));
+    assert_eq!(standard.hand_for(PhysicalKey::from_hid_usage(0x16)), None);
+}
+
 /// `InputState::model_snapshot` drops any press without a hand assignment, so
 /// a function key missing from this map can never draw its `Fn.png` overlay.
 #[test]

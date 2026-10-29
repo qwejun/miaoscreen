@@ -51,8 +51,21 @@ pub(crate) fn input_bindings_for_model(
     // them to the same keyboard mapping as the "standard"/"keyboard" presets;
     // each key still has to survive the artwork check below, so a model without
     // assets for a side simply reacts to nothing on that side.
-    let keyboard_model =
-        origin == ModelOrigin::Installed || matches!(model_id, "standard" | "keyboard");
+    // Which keys a model reacts to is decided by what it can draw, not by what
+    // it is called. A keyboard skin paints both paws; a standard-mode cat paints
+    // one. All sixty-two skins in the catalog agree with that reading, and the
+    // bundled `standard` is the exception that carries a full left hand and no
+    // right at all, so the two built-in ids stay named here.
+    //
+    // Reading the artwork is what lets the headless publisher reach the same
+    // answer: it has no catalog to consult, and the copy of this table it keeps
+    // used to hand every third-party keyboard skin the standard treatment, so
+    // nothing but `A` was ever bound and the paw never moved.
+    let draws_both_hands = !key_images.names(KeySide::Left).is_empty()
+        && !key_images.names(KeySide::Right).is_empty();
+    let keyboard_model = origin == ModelOrigin::Installed
+        || matches!(model_id, "standard" | "keyboard")
+        || draws_both_hands;
     let mut key_hands = BTreeMap::new();
     if keyboard_model {
         // Every key of the standard 104/105-key layout belongs to the left hand
@@ -117,7 +130,13 @@ pub(crate) fn input_bindings_for_model(
             key_images,
         );
     }
-    if origin == ModelOrigin::Installed || matches!(model_id, "keyboard" | "gamepad") {
+    // The arrow cluster is the right hand's on a model that draws it. A
+    // third-party keyboard skin gets the same treatment for the same reason it
+    // gets the keyboard table at all.
+    if origin == ModelOrigin::Installed
+        || matches!(model_id, "keyboard" | "gamepad")
+        || draws_both_hands
+    {
         for usage in RIGHT_ARROW.hid_usage()..=0x52 {
             bind_drawable_key(&mut key_hands, usage, HandSide::Right, key_images);
         }
@@ -174,17 +193,37 @@ pub(crate) fn gamepad_hands_for_model(
 /// it. The same key on a model with the artwork and on a model without it must
 /// not produce the same reaction: without the image there is nothing to show, so
 /// the press is dropped here rather than animated into an invisible key.
+///
+/// The hand is the preferred one when its artwork exists, and the other one when
+/// only it does. A third-party skin files every key under the paw that presses
+/// it — `H` in `right-keys`, `A` in `left-keys` — while the product's own table
+/// puts the whole main block on the left, which is how the bundled models are
+/// drawn. Without the fallback those letters were bound to a hand with no image
+/// for them, and the press produced nothing at all.
 pub(crate) fn bind_drawable_key(
     key_hands: &mut BTreeMap<PhysicalKey, HandSide>,
     hid_usage: u16,
     side: HandSide,
     key_images: &KeyImageInventory,
 ) {
-    let key_side = match side {
+    let drawn_by = [side, opposite(side)]
+        .into_iter()
+        .find(|hand| key_images.can_draw(key_side_of(*hand), hid_usage));
+    if let Some(hand) = drawn_by {
+        key_hands.insert(PhysicalKey::from_hid_usage(hid_usage), hand);
+    }
+}
+
+const fn opposite(side: HandSide) -> HandSide {
+    match side {
+        HandSide::Left => HandSide::Right,
+        HandSide::Right => HandSide::Left,
+    }
+}
+
+const fn key_side_of(side: HandSide) -> KeySide {
+    match side {
         HandSide::Left => KeySide::Left,
         HandSide::Right => KeySide::Right,
-    };
-    if key_images.can_draw(key_side, hid_usage) {
-        key_hands.insert(PhysicalKey::from_hid_usage(hid_usage), side);
     }
 }

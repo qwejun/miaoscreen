@@ -594,9 +594,22 @@ impl Render for SettingsView {
                                 ),
                             ),
                             SettingItem::new(
+                                // With the rotation on, this field is not what
+                                // the panel draws: the host sends `{random:…}`
+                                // instead of the text, and the panel picks a
+                                // line from the pools by the hour. The field is
+                                // still worth keeping — switching the rotation
+                                // off has to restore whatever was typed — but a
+                                // label that says "Banner text" over an edit box
+                                // the panel ignores is what made a rotating
+                                // panel look like a panel that lost sync.
                                 bongocat_i18n::text(
                                     language.catalog_locale(),
-                                    "settings.device_screen.banner.label",
+                                    if self.device_config().banner_random {
+                                        "settings.device_screen.banner.label_random"
+                                    } else {
+                                        "settings.device_screen.banner.label"
+                                    },
                                 ),
                                 SettingField::input(
                                     {
