@@ -567,6 +567,8 @@ public final class CatRenderer implements GLSurfaceView.Renderer {
 
     @Override
     public void onSurfaceCreated(GL10 unused, EGLConfig config) {
+        discardPreviousContext();
+
         GLES20.glClearColor(0f, 0f, 0f, 1f);
         GLES20.glDisable(GLES20.GL_DEPTH_TEST);
         GLES20.glDisable(GLES20.GL_CULL_FACE);
@@ -609,6 +611,43 @@ public final class CatRenderer implements GLSurfaceView.Renderer {
 
         windowStart = System.nanoTime();
         frames = 0;
+    }
+
+    /**
+     * Forgets everything the previous GL context owned.
+     *
+     * <p>Leaving the panel and coming back tears the context down — {@code
+     * GLSurfaceView} does that on every pause — and a new context is a new
+     * namespace. The texture names this renderer remembers mean nothing in it:
+     * binding one samples whatever that number happens to be now, which is
+     * usually nothing. The model then drew as black while the clock and the
+     * banner came back, because those are repainted on every resize and so
+     * happened to be rebuilt. Frames keep arriving either way, so the panel
+     * looked connected and only the cat was gone.
+     *
+     * <p>The host only sends textures at the head of a connection, so a lost
+     * context is only recoverable by dialling again. Nothing is dialled on the
+     * first creation, when there is no previous context to forget.
+     */
+    private void discardPreviousContext() {
+        boolean hadResources = textures.size() > 0 || keyTextures.size() > 0 || scene != null;
+        textures.clear();
+        keyTextures.clear();
+        // The old framebuffers and their attachments died with the context; the
+        // names are stale and deleting them would address the new namespace.
+        maskTargets.clear();
+        releaseBand();
+        if (scene != null) {
+            scene.recycle();
+            scene = null;
+        }
+        haveFrame = false;
+        cleared = false;
+        if (hadResources) {
+            Log.i(TAG, "GL context replaced: discarding "
+                    + "the model and asking the host for it again");
+            client.reconnect();
+        }
     }
 
     @Override

@@ -82,6 +82,13 @@ public final class MainActivity extends Activity {
         surface = new GLSurfaceView(this);
         surface.setEGLContextClientVersion(2);
         surface.setEGLConfigChooser(8, 8, 8, 8, 16, 0);
+        // The model's atlases are uploaded once, at the head of a connection, and
+        // the host does not resend them on request: a context destroyed by a trip
+        // to the launcher costs a full reconnect and a screen with no cat until it
+        // finishes. Keeping the context across a pause makes that trip free, and
+        // the renderer still knows what to do on the occasions the driver takes it
+        // away anyway.
+        surface.setPreserveEGLContextOnPause(true);
         CatRenderer renderer = new CatRenderer(client);
         // Parsed here rather than on the GL thread: each face is up to 3MB and
         // `createFromAsset` reads the whole file, which is not time the renderer

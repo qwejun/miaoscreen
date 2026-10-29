@@ -228,6 +228,24 @@ final class PublisherClient implements Runnable, UdpFrameChannel.Sink {
         socket = null;
     }
 
+    /**
+     * Drops the current session so the loop dials the same host again.
+     *
+     * <p>The panel asks for this when its GL context went away. Every texture it
+     * uploaded belonged to that context, and the host only sends resources at the
+     * start of a connection — so the only way to get an atlas back is a new
+     * session. Changing the address will not do it: it is the same host, and
+     * {@link #switchAddress} returns early on the address it already has.
+     *
+     * <p>The socket is closed rather than interrupted: the reader is blocked in
+     * {@code read()}, and closing is what makes that call return.
+     */
+    void reconnect() {
+        Log.i(TAG, "dropping the session to fetch the model again");
+        closeQuietly(socket);
+        socket = null;
+    }
+
     /** The newest decoded resources, or null when none arrived since the last call. */
     Scene takeScene() {
         synchronized (lock) {
