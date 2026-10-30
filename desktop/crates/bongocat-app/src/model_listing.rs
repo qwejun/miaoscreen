@@ -67,6 +67,7 @@ const PRESET_MODELS: &[PresetModel] = &[
     PresetModel { id: "classic-mini-keyboard-standard", title: "经典小键盘", mode: ModelInputMode::Standard, built_in: false },
     PresetModel { id: "closure", title: "归终", mode: ModelInputMode::Standard, built_in: false },
     PresetModel { id: "colleta", title: "珂莱塔", mode: ModelInputMode::Standard, built_in: false },
+    PresetModel { id: "crayon-shin-chan-keyboard", title: "蜡笔小新 · 键盘", mode: ModelInputMode::Keyboard, built_in: false },
     PresetModel { id: "da-yuexia", title: "大月下", mode: ModelInputMode::Standard, built_in: false },
     PresetModel { id: "deer-head", title: "鹿头", mode: ModelInputMode::Standard, built_in: false },
     PresetModel { id: "dinosaur-firefly", title: "恐龙流萤", mode: ModelInputMode::Standard, built_in: false },

@@ -26,6 +26,7 @@ desktop/vendor/cubism/
 # 那样 `!` 就无法再包含目录里的文件。
 /desktop/resources/models/*/
 !/desktop/resources/models/standard/
+!/desktop/resources/models/crayon-shin-chan-keyboard/
 !/desktop/resources/models/keyboard/
 !/desktop/resources/models/gamepad/
 
