@@ -14,6 +14,19 @@ the application directory.
 The application archive unpacks to ``MiaoScreen-<version>-windows-x64/``. The
 skins come from the model tree; run ``scripts/fetch-skins.py`` first if they
 are missing.
+
+The executable must be a **Production** build::
+
+    cd desktop && cargo build --release -p bongocat-app --features production
+
+Without that Cargo feature ``BUILD_ENVIRONMENT`` is ``Development`` and the
+build loses three product capabilities at once — login-at-startup (disabled
+outright, ADR-0051), the remote plugin catalog (it reads a local
+``target/plugin-dev`` directory instead), and the production configuration
+root. A release built from a plain ``cargo build --release`` therefore ships a
+startup switch that can only say "unavailable in development builds", which is
+exactly what 0.1.7 did. ``scripts/build-release.ps1`` runs the right command;
+this script refuses to pack when the binary is not a Production one.
 """
 
 from __future__ import annotations
@@ -37,6 +50,13 @@ BUILT_IN = ('standard', 'keyboard', 'gamepad')
 # (`product_icon_contract.rs`, `system_menu_native.rs`), so only the Live2D
 # models are read from disk at runtime.
 PACKAGED_RESOURCES = ('models',)
+# The two plugin sources are mutually exclusive at compile time and neither
+# string is reachable from shared code: a Production build carries the remote
+# repository name, a Development build carries the local `target/plugin-dev`
+# path. Checking both is the only way to tell the two binaries apart after the
+# fact, and it is exactly the Cargo feature this archive depends on.
+PRODUCTION_MARKER = b'BongoCat-Plugins'
+DEVELOPMENT_MARKER = b'plugin-dev'
 
 
 def version() -> str:
@@ -68,6 +88,21 @@ def write_archive(target: pathlib.Path, entries) -> tuple[int, int]:
     return files, target.stat().st_size
 
 
+def verify_production_build(executable: pathlib.Path) -> None:
+    """Refuse to ship a Development build, which is a different product."""
+    image = executable.read_bytes()
+    if PRODUCTION_MARKER in image and DEVELOPMENT_MARKER not in image:
+        return
+    raise SystemExit(
+        f'{executable} is not a Production build '
+        f'(remote plugin source: {"present" if PRODUCTION_MARKER in image else "missing"}, '
+        f'local dev path: {"present" if DEVELOPMENT_MARKER in image else "absent"}).\n'
+        'Packaging it would ship a startup switch that only reads "unavailable in '
+        'development builds". Rebuild with:\n'
+        '  cd desktop && cargo build --release -p bongocat-app --features production'
+    )
+
+
 def main_entries(stage: pathlib.Path):
     for path in sorted(stage.rglob('*')):
         arcname = f'{stage.name}/{path.relative_to(stage).as_posix()}'
@@ -84,6 +119,7 @@ def pack_main(release: str) -> pathlib.Path:
     executable = BUILD / 'bongocat-app.exe'
     if not executable.is_file():
         raise SystemExit(f'missing release build at {executable}')
+    verify_production_build(executable)
     shutil.copy2(executable, stage / f'{name}.exe')
 
     # The VC runtime is the one the 0.1.4 archive shipped; the executable links

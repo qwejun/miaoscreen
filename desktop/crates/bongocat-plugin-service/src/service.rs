@@ -10,7 +10,7 @@ use crate::command::{
     PluginCard, PluginCenterSnapshot, PluginCommand, PluginCommandError, PluginReply,
     PluginServiceClient, PluginServiceEndpoint,
 };
-use crate::{LOOP_INTERVAL, TICK_INTERVAL};
+use crate::{LOOP_INTERVAL, PLUGIN_HOST_VERSION, TICK_INTERVAL};
 use bongocat_plugin_hud::{
     HudCompositor, HudConsumer, HudInteraction, HudLayer, HudProducer, HudViewport,
     HudViewportReader, HudViewportReporter, PluginHudFrame, latest_hud_channel,
@@ -434,7 +434,8 @@ impl Worker {
         }
         let source = self.source.clone();
         let stop = Arc::clone(&self.catalog_stop);
-        self.start_catalog_job(move || source.discover(env!("CARGO_PKG_VERSION"), &stop));
+        // The catalog speaks in upstream release numbers, not in this product's.
+        self.start_catalog_job(move || source.discover(PLUGIN_HOST_VERSION, &stop));
     }
 
     fn finish_catalog_job(&mut self) {

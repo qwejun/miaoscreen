@@ -28,6 +28,20 @@ pub use command::{
 };
 pub use service::{PluginOverlayHandles, PluginService, PluginServiceStartError, plugin_directory};
 
+/// The application version the plugin catalog is checked against.
+///
+/// A plugin declares the app releases it runs on (`app_versions`, `>=2.3.1` for
+/// everything in the published catalog), and the manager drops every entry that
+/// does not admit the version it was handed. That version used to be this
+/// product's own `CARGO_PKG_VERSION`, which is `0.1.x` — a number no plugin has
+/// ever heard of, so the center opened on "no plugins available" while the
+/// catalog was full.
+///
+/// The host code here is the upstream 2.4.0 tree, which is exactly what those
+/// plugins were built against; only the product's release number is local. This
+/// constant says so once, in the place that owns the question.
+pub const PLUGIN_HOST_VERSION: &str = "2.4.0";
+
 /// How often the service looks for work.
 ///
 /// One loop serves both cadences: it drains commands and clicks, ticks the
