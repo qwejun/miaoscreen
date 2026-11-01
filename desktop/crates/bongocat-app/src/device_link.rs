@@ -43,19 +43,20 @@ const CABLE_LAUNCH_INTERVAL: Duration = Duration::from_secs(30);
 /// that was already about to reconnect.
 const CABLE_PANEL_GRACE: Duration = Duration::from_secs(8);
 
-/// How often the trending-banner worker looks at whether it has anything to do.
+/// How long one trending title stays on the panel, and how often the worker
+/// looks at whether it has anything to do.
 ///
-/// A tick is not a fetch: it is the interval at which the worker notices that
-/// the person switched the source on, so turning the banner to a hot list shows
-/// a line within this rather than within a full refresh.
-const HOT_TICK: Duration = Duration::from_secs(5);
+/// Long enough to read a short sentence twice, short enough that a list of ten
+/// cycles in about a minute. This is the rotation step, not the network step:
+/// a fetch every six seconds would be rude to a free public endpoint.
+const HOT_TICK: Duration = Duration::from_secs(6);
 
-/// How long one trending title stays on the panel.
+/// How often the list itself is re-fetched.
 ///
-/// Long enough to read a sentence twice, short enough that a list which has not
-/// changed since the last refresh does not look frozen. The list itself is
-/// re-fetched at this cadence, so a title that has left the list stops being
-/// shown within one interval.
+/// The worker advances one title per `HOT_TICK` from whatever it last fetched,
+/// so this only decides how stale the ranking is allowed to get. Three minutes
+/// is under the polling interval of the mirrors themselves — asking faster would
+/// return the same list, and the rotation already makes the line move.
 const HOT_REFRESH: Duration = Duration::from_secs(180);
 
 /// The strip layout this build writes: band height and line positions as of the
@@ -351,8 +352,15 @@ impl ProductDeviceLink {
             .spawn(move || {
                 // The first fetch happens on the first tick rather than here, so
                 // a launch with the source off touches the network zero times.
-                let mut last: Option<Instant> = None;
+                //
+                // Two clocks, not one: the list is re-fetched every
+                // `HOT_REFRESH`, and the line advances one title per
+                // `HOT_TICK`. Driving both from the fetch made the panel show
+                // the top title for three minutes and then jump to the second
+                // one — a playlist that looks stuck, not a playlist.
+                let mut titles: Vec<String> = Vec::new();
                 let mut cursor = 0usize;
+                let mut last_fetch: Option<Instant> = None;
                 loop {
                     std::thread::sleep(HOT_TICK);
                     let Some(link) = weak.upgrade() else {
@@ -361,20 +369,33 @@ impl ProductDeviceLink {
                     if link.hot_source() == BannerHot::Off {
                         // Nothing to do: switching the source off already
                         // re-pushed the strip, so the typed banner is back.
+                        // Dropping the list as well makes switching it back on
+                        // start from the top instead of resuming mid-cycle days
+                        // later.
+                        titles.clear();
+                        cursor = 0;
+                        last_fetch = None;
                         continue;
                     }
-                    if last.is_some_and(|at| at.elapsed() < HOT_REFRESH) {
-                        continue;
+                    if last_fetch.map_or(true, |at| at.elapsed() >= HOT_REFRESH) {
+                        last_fetch = Some(Instant::now());
+                        let fetched = crate::hot_banner::fetch_titles();
+                        if !fetched.is_empty() {
+                            // A new list starts at the top: the order is the
+                            // ranking, so resuming at an old offset would drop
+                            // the person into the middle of a shuffle.
+                            titles = fetched;
+                            cursor = 0;
+                        }
                     }
-                    last = Some(Instant::now());
-                    let titles = crate::hot_banner::fetch_titles();
                     if titles.is_empty() {
-                        // Keep whatever is on screen: an unreachable source is a
-                        // stale line, not a blank one.
+                        // Nothing has been fetched yet, or the source has never
+                        // answered. Keep whatever is on screen: an unreachable
+                        // source is a stale line, not a blank one.
                         continue;
                     }
                     let line = titles[cursor % titles.len()].clone();
-                    cursor = cursor.wrapping_add(1);
+                    cursor = (cursor + 1) % titles.len();
                     link.publish_hot(line);
                 }
             });
@@ -715,6 +736,13 @@ impl DeviceLink for ProductDeviceLink {
         // strip: the rest of the page can change without the banner falling back
         // to the typed sentence for a refresh interval.
         let line = if config.banner_hot == BannerHot::Off {
+            // Switching the source off also drops the last title. Holding it
+            // would show a sentence from a list fetched hours ago the moment the
+            // source is turned back on, until the worker catches up.
+            *self
+                .hot_line
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner) = None;
             None
         } else {
             self.hot_line()
