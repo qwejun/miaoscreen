@@ -365,6 +365,13 @@ pub struct DeviceOverlayConfig {
     /// a pool of fixed sentences is the opposite of that. Switching it back to
     /// `Off` restores whatever was typed without touching it.
     pub banner_hot: BannerHot,
+    /// How long one trending title stays on the panel, in seconds.
+    ///
+    /// A person reads at their own speed and the panel is a desk object looked
+    /// at in passing, so a fixed step is wrong in both directions: too long and
+    /// a ten-item list takes forever to come round, too short and the line
+    /// changes while it is being read.
+    pub banner_hot_interval: u16,
 }
 
 impl Default for DeviceOverlayConfig {
@@ -388,6 +395,7 @@ impl Default for DeviceOverlayConfig {
             banner_pools: BannerPools::default(),
             banner_custom: String::new(),
             banner_hot: BannerHot::Off,
+            banner_hot_interval: 6,
         }
     }
 }

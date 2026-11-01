@@ -448,7 +448,8 @@
         "hot": {
           "label": "Trending",
           "off": "Off",
-          "weibo": "Weibo trending"
+          "weibo": "Weibo trending",
+          "interval": "Seconds per title"
         },
         "size": {
           "label": "Banner size"

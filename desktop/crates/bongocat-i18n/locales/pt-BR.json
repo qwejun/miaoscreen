@@ -448,7 +448,8 @@
         "hot": {
           "label": "Assuntos do momento",
           "off": "Desativado",
-          "weibo": "Tendências do Weibo"
+          "weibo": "Tendências do Weibo",
+          "interval": "Segundos por título"
         },
         "size": {
           "label": "Tamanho do banner"

@@ -448,7 +448,8 @@
         "hot": {
           "label": "Sujets tendance",
           "off": "Désactivé",
-          "weibo": "Tendances Weibo"
+          "weibo": "Tendances Weibo",
+          "interval": "Secondes par titre"
         },
         "size": {
           "label": "Taille du bandeau"

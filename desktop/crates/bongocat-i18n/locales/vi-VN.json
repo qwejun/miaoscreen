@@ -448,7 +448,8 @@
         "hot": {
           "label": "Chủ đề nóng",
           "off": "Tắt",
-          "weibo": "Xu hướng Weibo"
+          "weibo": "Xu hướng Weibo",
+          "interval": "Số giây mỗi tiêu đề"
         },
         "size": {
           "label": "Cỡ khẩu hiệu"

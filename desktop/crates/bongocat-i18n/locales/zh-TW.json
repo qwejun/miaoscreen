@@ -448,7 +448,8 @@
         "hot": {
           "label": "熱搜",
           "off": "關閉",
-          "weibo": "微博熱搜"
+          "weibo": "微博熱搜",
+          "interval": "每條停留（秒）"
         },
         "size": {
           "label": "標語字級"

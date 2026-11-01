@@ -704,6 +704,46 @@ impl Render for SettingsView {
                             SettingItem::new(
                                 bongocat_i18n::text(
                                     language.catalog_locale(),
+                                    "settings.device_screen.banner.hot.interval",
+                                ),
+                                SettingField::number_input(
+                                    NumberFieldOptions {
+                                        // Both ends are clamped again on the
+                                        // way into the worker: a hand-edited
+                                        // file is not a reason to spin.
+                                        min: 3.0,
+                                        max: 120.0,
+                                        step: 1.0,
+                                    },
+                                    {
+                                        let view = view_entity.clone();
+                                        move |app| {
+                                            f64::from(
+                                                view.read(app)
+                                                    .device_config()
+                                                    .banner_hot_interval,
+                                            )
+                                        }
+                                    },
+                                    {
+                                        let view = view_entity.clone();
+                                        move |value: f64, app: &mut App| {
+                                            let secs = value.round().clamp(3.0, 120.0) as u16;
+                                            view.update(app, |view, cx| {
+                                                view.update_device_config(
+                                                    |config| {
+                                                        config.banner_hot_interval = secs;
+                                                    },
+                                                    cx,
+                                                );
+                                            });
+                                        }
+                                    },
+                                ),
+                            ),
+                            SettingItem::new(
+                                bongocat_i18n::text(
+                                    language.catalog_locale(),
                                     "settings.device_screen.banner.size.label",
                                 ),
                                 SettingField::number_input(

@@ -43,20 +43,20 @@ const CABLE_LAUNCH_INTERVAL: Duration = Duration::from_secs(30);
 /// that was already about to reconnect.
 const CABLE_PANEL_GRACE: Duration = Duration::from_secs(8);
 
-/// How long one trending title stays on the panel, and how often the worker
-/// looks at whether it has anything to do.
+/// How often the trending-banner worker looks at its two clocks.
 ///
-/// Long enough to read a short sentence twice, short enough that a list of ten
-/// cycles in about a minute. This is the rotation step, not the network step:
-/// a fetch every six seconds would be rude to a free public endpoint.
-const HOT_TICK: Duration = Duration::from_secs(6);
+/// This is a polling granularity, not a cadence: it decides how late the worker
+/// can be when the person drags the interval down to three seconds. The two
+/// real intervals are the stored rotation step and `HOT_REFRESH`.
+const HOT_CHECK: Duration = Duration::from_millis(500);
 
 /// How often the list itself is re-fetched.
 ///
-/// The worker advances one title per `HOT_TICK` from whatever it last fetched,
-/// so this only decides how stale the ranking is allowed to get. Three minutes
-/// is under the polling interval of the mirrors themselves — asking faster would
-/// return the same list, and the rotation already makes the line move.
+/// The worker advances one title per rotation step from whatever it last
+/// fetched, so this only decides how stale the ranking is allowed to get. Three
+/// minutes is under the polling interval of the mirrors themselves — asking
+/// faster would return the same list, and the rotation already makes the line
+/// move.
 const HOT_REFRESH: Duration = Duration::from_secs(180);
 
 /// The strip layout this build writes: band height and line positions as of the
@@ -82,6 +82,15 @@ const LEGACY_DATE_TEMPLATE: &str = "{yyyy}-{MM}-{dd} {W}";
 /// sits at. Both ends are the panel's limits rather than a preference, so the
 /// page offers the range and the reader never has to guess.
 const BANNER_SIZE_RANGE: (u16, u16) = (16, 44);
+
+/// The seconds one trending title may stay on the panel, and the bounds the
+/// page offers for it.
+///
+/// Three seconds is the floor because a shorter glance is not reading; two
+/// minutes is the ceiling because a list that changes twice an hour is
+/// indistinguishable from a still line. Anything outside is clamped rather than
+/// rejected — a hand-edited file is not a reason to refuse to start.
+const BANNER_HOT_INTERVAL_RANGE: (u16, u16) = (3, 120);
 
 /// The size and place the "low" style pins the banner to, in panel pixels.
 ///
@@ -155,6 +164,10 @@ struct StoredConfig {
     /// means `off`, which is what every file written before the source existed
     /// has to keep meaning.
     banner_hot: Option<String>,
+    /// Seconds one trending title stays on the panel. Absent means the default
+    /// step, which is what a file written before the setting existed asked for
+    /// by doing nothing.
+    banner_hot_interval: Option<u16>,
     /// `wireless` or `wired`. Absent means the network, which needs no cable.
     link: Option<String>,
     /// Layout revision of the strip. Absent means the file was written before
@@ -223,6 +236,12 @@ impl StoredConfig {
             banner_pools: self.banner_pools.unwrap_or(defaults.banner_pools),
             banner_custom: self.banner_custom.unwrap_or(defaults.banner_custom),
             banner_hot: BannerHot::from_id(self.banner_hot.as_deref().unwrap_or_default()),
+            banner_hot_interval: self
+                .banner_hot_interval
+                .map(|secs| {
+                    secs.clamp(BANNER_HOT_INTERVAL_RANGE.0, BANNER_HOT_INTERVAL_RANGE.1)
+                })
+                .unwrap_or(defaults.banner_hot_interval),
         }
     }
 
@@ -241,6 +260,7 @@ impl StoredConfig {
             banner_pools: Some(config.banner_pools),
             banner_custom: Some(config.banner_custom.clone()),
             banner_hot: Some(config.banner_hot.id().to_owned()),
+            banner_hot_interval: Some(config.banner_hot_interval),
             link: None,
             strip_layout: Some(STRIP_LAYOUT),
             adb: None,
@@ -350,19 +370,21 @@ impl ProductDeviceLink {
         let spawned = std::thread::Builder::new()
             .name("hot-banner".to_owned())
             .spawn(move || {
-                // The first fetch happens on the first tick rather than here, so
+                // The first fetch happens on the first check rather than here, so
                 // a launch with the source off touches the network zero times.
                 //
-                // Two clocks, not one: the list is re-fetched every
-                // `HOT_REFRESH`, and the line advances one title per
-                // `HOT_TICK`. Driving both from the fetch made the panel show
-                // the top title for three minutes and then jump to the second
-                // one — a playlist that looks stuck, not a playlist.
+                // Three clocks, not one: the list is re-fetched every
+                // `HOT_REFRESH`, the line advances once per the person's own
+                // interval, and `HOT_CHECK` is only how promptly the worker
+                // notices either. Driving everything from the fetch made the
+                // panel show the top title for three minutes and then jump to
+                // the second one — a playlist that looks stuck, not a playlist.
                 let mut titles: Vec<String> = Vec::new();
                 let mut cursor = 0usize;
                 let mut last_fetch: Option<Instant> = None;
+                let mut last_advance: Option<Instant> = None;
                 loop {
-                    std::thread::sleep(HOT_TICK);
+                    std::thread::sleep(HOT_CHECK);
                     let Some(link) = weak.upgrade() else {
                         return;
                     };
@@ -375,6 +397,7 @@ impl ProductDeviceLink {
                         titles.clear();
                         cursor = 0;
                         last_fetch = None;
+                        last_advance = None;
                         continue;
                     }
                     if last_fetch.map_or(true, |at| at.elapsed() >= HOT_REFRESH) {
@@ -383,9 +406,13 @@ impl ProductDeviceLink {
                         if !fetched.is_empty() {
                             // A new list starts at the top: the order is the
                             // ranking, so resuming at an old offset would drop
-                            // the person into the middle of a shuffle.
+                            // the person into the middle of a shuffle. The
+                            // discount also puts the first title up at once
+                            // instead of after one more interval of the old
+                            // line, which by then has been stale for minutes.
                             titles = fetched;
                             cursor = 0;
+                            last_advance = None;
                         }
                     }
                     if titles.is_empty() {
@@ -394,9 +421,21 @@ impl ProductDeviceLink {
                         // source is a stale line, not a blank one.
                         continue;
                     }
-                    let line = titles[cursor % titles.len()].clone();
-                    cursor = (cursor + 1) % titles.len();
-                    link.publish_hot(line);
+                    // Read every pass, so dragging the interval in the page
+                    // takes effect on the next title instead of at the next
+                    // restart.
+                    if last_advance.map_or(true, |at| at.elapsed() >= link.hot_interval()) {
+                        last_advance = Some(Instant::now());
+                        // The rank travels with the title: a line lifted out of a
+                        // list reads as a fragment without it. The number counts
+                        // what the panel is actually showing rather than the
+                        // source's own ranking, so a title dropped for being too
+                        // long does not leave a hole in the sequence.
+                        let rank = cursor % titles.len();
+                        let line = format!("{}. {}", rank + 1, titles[rank]);
+                        cursor = (cursor + 1) % titles.len();
+                        link.publish_hot(line);
+                    }
                 }
             });
         if let Err(error) = spawned {
@@ -411,6 +450,23 @@ impl ProductDeviceLink {
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .banner_hot
+    }
+
+    /// How long the worker leaves one trending title up.
+    ///
+    /// Clamped on the way out rather than trusted: the field is a `u16` a person
+    /// can type into, and both ends of the range have a meaning — a zero would
+    /// spin the worker against the socket, and a huge number would look like the
+    /// feature had stopped.
+    fn hot_interval(&self) -> Duration {
+        let secs = self
+            .config
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .banner_hot_interval;
+        Duration::from_secs(u64::from(
+            secs.clamp(BANNER_HOT_INTERVAL_RANGE.0, BANNER_HOT_INTERVAL_RANGE.1),
+        ))
     }
 
     fn hot_line(&self) -> Option<String> {
