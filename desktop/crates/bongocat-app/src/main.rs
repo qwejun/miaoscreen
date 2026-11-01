@@ -22,6 +22,7 @@
 #[cfg(test)]
 mod binary_tests;
 mod device_link;
+mod hot_banner;
 mod usb_link;
 mod dev_plugins;
 mod gamepad_observer;

@@ -34,6 +34,10 @@ bongocat-runtime.workspace = true
 bongocat-storage.workspace = true
 bongocat-ui.workspace = true
 bongocat-update.workspace = true
+# Only for its re-exported `reqwest`: the blocking client the trending-banner
+# fetch uses is the same one the plugin manager already links, so this adds no
+# new TLS stack and no second HTTP implementation to the binary.
+cargo-packager-updater.workspace = true
 clap.workspace = true
 gpui-kit.workspace = true
 gpui-pre-reqwest-client.workspace = true

@@ -445,6 +445,11 @@
         "random": {
           "label": "Lời cổ vũ ngẫu nhiên"
         },
+        "hot": {
+          "label": "Chủ đề nóng",
+          "off": "Tắt",
+          "weibo": "Xu hướng Weibo"
+        },
         "size": {
           "label": "Cỡ khẩu hiệu"
         },

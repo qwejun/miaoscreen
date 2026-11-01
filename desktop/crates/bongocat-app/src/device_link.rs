@@ -17,7 +17,7 @@ use bongocat_audio::MotionAudioSink;
 use bongocat_magneo::protocol::{Font, Overlay, Rows};
 use bongocat_magneo::MagneoHandle;
 use bongocat_ui::{
-    BannerFont, BannerPools, BannerRows, BannerStyle, DeviceLink, DeviceLinkMode,
+    BannerFont, BannerHot, BannerPools, BannerRows, BannerStyle, DeviceLink, DeviceLinkMode,
     DeviceLinkProblem, DeviceLinkState, DeviceOverlayConfig,
     LiveLink,
 };
@@ -42,6 +42,21 @@ const CABLE_LAUNCH_INTERVAL: Duration = Duration::from_secs(30);
 /// wait is what keeps the fallback below from launching over the top of a panel
 /// that was already about to reconnect.
 const CABLE_PANEL_GRACE: Duration = Duration::from_secs(8);
+
+/// How often the trending-banner worker looks at whether it has anything to do.
+///
+/// A tick is not a fetch: it is the interval at which the worker notices that
+/// the person switched the source on, so turning the banner to a hot list shows
+/// a line within this rather than within a full refresh.
+const HOT_TICK: Duration = Duration::from_secs(5);
+
+/// How long one trending title stays on the panel.
+///
+/// Long enough to read a sentence twice, short enough that a list which has not
+/// changed since the last refresh does not look frozen. The list itself is
+/// re-fetched at this cadence, so a title that has left the list stops being
+/// shown within one interval.
+const HOT_REFRESH: Duration = Duration::from_secs(180);
 
 /// The strip layout this build writes: band height and line positions as of the
 /// clock card in the upper-left corner. Bumped when the geometry changes so an
@@ -135,6 +150,10 @@ struct StoredConfig {
     banner_pools: Option<BannerPools>,
     /// The person's own sentences, one per `；`. Absent means none.
     banner_custom: Option<String>,
+    /// Where a trending-topic banner comes from; `off` or a source id. Absent
+    /// means `off`, which is what every file written before the source existed
+    /// has to keep meaning.
+    banner_hot: Option<String>,
     /// `wireless` or `wired`. Absent means the network, which needs no cable.
     link: Option<String>,
     /// Layout revision of the strip. Absent means the file was written before
@@ -202,6 +221,7 @@ impl StoredConfig {
                 .unwrap_or(defaults.banner_style),
             banner_pools: self.banner_pools.unwrap_or(defaults.banner_pools),
             banner_custom: self.banner_custom.unwrap_or(defaults.banner_custom),
+            banner_hot: BannerHot::from_id(self.banner_hot.as_deref().unwrap_or_default()),
         }
     }
 
@@ -219,6 +239,7 @@ impl StoredConfig {
             banner_style: Some(config.banner_style.id().to_owned()),
             banner_pools: Some(config.banner_pools),
             banner_custom: Some(config.banner_custom.clone()),
+            banner_hot: Some(config.banner_hot.id().to_owned()),
             link: None,
             strip_layout: Some(STRIP_LAYOUT),
             adb: None,
@@ -246,6 +267,12 @@ pub(crate) struct ProductDeviceLink {
     /// rather than the resolved one.
     adb_configured: Option<String>,
     path: Option<PathBuf>,
+    /// The trending line currently on the panel, if the banner is a hot list.
+    ///
+    /// Held here rather than in the config because it is not a preference: it
+    /// changes while nobody is looking, and writing every refresh to disk would
+    /// rewrite the file under the person's edits.
+    hot_line: Mutex<Option<String>>,
 }
 
 impl ProductDeviceLink {
@@ -289,8 +316,10 @@ impl ProductDeviceLink {
             adb: usb_link::locate(adb_configured.as_deref()),
             adb_configured,
             path,
+            hot_line: Mutex::new(None),
         });
-        link.handle.set_overlay(Some(Arc::new(overlay_for(&config))));
+        link.handle
+            .set_overlay(Some(Arc::new(overlay_for(&config, None))));
         // A headless run has no settings window to ask for snapshots, so the
         // environment can ask instead. This is how the snapshot channel is
         // verified without a person opening a page.
@@ -304,7 +333,95 @@ impl ProductDeviceLink {
         // is started.
         link.apply_mode();
         link.watch_cable();
+        link.watch_hot_banner();
         link
+    }
+
+    /// Keeps the banner fed while it is showing a trending list.
+    ///
+    /// A thread of its own because the fetch is a blocking request to a third
+    /// party: the overlay push is a message to the panel's socket, so the panel
+    /// keeps drawing whatever was last sent while this is between refreshes, and
+    /// a source that is slow or down costs the line its freshness rather than
+    /// the picture its frames.
+    fn watch_hot_banner(self: &Arc<Self>) {
+        let weak = Arc::downgrade(self);
+        let spawned = std::thread::Builder::new()
+            .name("hot-banner".to_owned())
+            .spawn(move || {
+                // The first fetch happens on the first tick rather than here, so
+                // a launch with the source off touches the network zero times.
+                let mut last: Option<Instant> = None;
+                let mut cursor = 0usize;
+                loop {
+                    std::thread::sleep(HOT_TICK);
+                    let Some(link) = weak.upgrade() else {
+                        return;
+                    };
+                    if link.hot_source() == BannerHot::Off {
+                        // Nothing to do: switching the source off already
+                        // re-pushed the strip, so the typed banner is back.
+                        continue;
+                    }
+                    if last.is_some_and(|at| at.elapsed() < HOT_REFRESH) {
+                        continue;
+                    }
+                    last = Some(Instant::now());
+                    let titles = crate::hot_banner::fetch_titles();
+                    if titles.is_empty() {
+                        // Keep whatever is on screen: an unreachable source is a
+                        // stale line, not a blank one.
+                        continue;
+                    }
+                    let line = titles[cursor % titles.len()].clone();
+                    cursor = cursor.wrapping_add(1);
+                    link.publish_hot(line);
+                }
+            });
+        if let Err(error) = spawned {
+            // A missing banner thread is not worth refusing to start over, but it
+            // must not be silent either: the setting would look broken.
+            eprintln!("hot banner worker did not start: {error}");
+        }
+    }
+
+    fn hot_source(&self) -> BannerHot {
+        self.config
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .banner_hot
+    }
+
+    fn hot_line(&self) -> Option<String> {
+        self.hot_line
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone()
+    }
+
+    /// Puts one trending title on the panel without touching the stored config.
+    fn publish_hot(&self, line: String) {
+        *self
+            .hot_line
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(line);
+        self.push_overlay();
+    }
+
+    /// Re-sends the strip as it stands, including whatever the hot list holds.
+    fn push_overlay(&self) {
+        let config = self
+            .config
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone();
+        let line = if config.banner_hot == BannerHot::Off {
+            None
+        } else {
+            self.hot_line()
+        };
+        self.handle
+            .set_overlay(Some(Arc::new(overlay_for(&config, line.as_deref()))));
     }
 
     /// Keeps the cable path working after the moment it was set up.
@@ -594,7 +711,16 @@ impl DeviceLink for ProductDeviceLink {
     }
 
     fn apply_overlay(&self, config: &DeviceOverlayConfig) {
-        self.handle.set_overlay(Some(Arc::new(overlay_for(config))));
+        // Whatever trending line is already on screen travels with the new
+        // strip: the rest of the page can change without the banner falling back
+        // to the typed sentence for a refresh interval.
+        let line = if config.banner_hot == BannerHot::Off {
+            None
+        } else {
+            self.hot_line()
+        };
+        self.handle
+            .set_overlay(Some(Arc::new(overlay_for(config, line.as_deref()))));
         let mut stored = self
             .config
             .lock()
@@ -665,7 +791,7 @@ fn random_banner_spec(config: &DeviceOverlayConfig) -> String {
 /// Typography comes from `Overlay::default_strip` and only the text travels, so
 /// the page can stay a text editor instead of growing a font picker: the panel's
 /// three lines are a design, not a document.
-fn overlay_for(config: &DeviceOverlayConfig) -> Overlay {
+fn overlay_for(config: &DeviceOverlayConfig, hot: Option<&str>) -> Overlay {
     if !config.enabled || config.band_px == 0 {
         let mut off = Overlay::default_strip();
         off.band_px = 0;
@@ -674,7 +800,12 @@ fn overlay_for(config: &DeviceOverlayConfig) -> Overlay {
     }
     let mut strip = Overlay::default_strip();
     strip.band_px = config.band_px;
-    let banner = if config.banner_random {
+    // The order is the person's intent: a trending line is something happening
+    // now, so it wins over both the typed sentence and the fixed pools. The
+    // panel is told nothing about which of the three it is receiving.
+    let banner = if let Some(hot) = hot {
+        hot.to_owned()
+    } else if config.banner_random {
         random_banner_spec(config)
     } else {
         config.banner.clone()

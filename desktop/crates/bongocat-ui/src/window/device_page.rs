@@ -300,6 +300,40 @@ impl BannerRows {
     }
 }
 
+/// Where a banner that is not the person's own text comes from.
+///
+/// The panel only ever receives a finished string, so a hot-topic line is not a
+/// protocol feature: this side fetches it and sends it as the banner. The choice
+/// is stored here because it is a preference about what the panel says, not
+/// about how it is reached.
+///
+/// `Off` is the default and the state every file written before this setting
+/// existed reads as, which is what keeps an upgrade from silently replacing the
+/// line a person typed.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum BannerHot {
+    /// The banner is whatever the fields above say it is.
+    Off,
+    /// The top of Weibo's trending list, one title per refresh.
+    Weibo,
+}
+
+impl BannerHot {
+    pub fn id(self) -> &'static str {
+        match self {
+            Self::Off => "off",
+            Self::Weibo => "weibo",
+        }
+    }
+
+    pub fn from_id(id: &str) -> Self {
+        match id {
+            "weibo" => Self::Weibo,
+            _ => Self::Off,
+        }
+    }
+}
+
 /// The strip settings the page edits.
 #[derive(Clone, Debug, PartialEq)]
 pub struct DeviceOverlayConfig {
@@ -324,6 +358,13 @@ pub struct DeviceOverlayConfig {
     pub banner_pools: BannerPools,
     /// The person's own sentences, one per `；`, rotated with the pools.
     pub banner_custom: String,
+    /// Whether the banner is a trending topic instead of anything above.
+    ///
+    /// Takes precedence over both the typed text and the random rotation: a
+    /// person who turned the trending list on asked for what is happening, and
+    /// a pool of fixed sentences is the opposite of that. Switching it back to
+    /// `Off` restores whatever was typed without touching it.
+    pub banner_hot: BannerHot,
 }
 
 impl Default for DeviceOverlayConfig {
@@ -346,6 +387,7 @@ impl Default for DeviceOverlayConfig {
             banner_style: BannerStyle::Plain,
             banner_pools: BannerPools::default(),
             banner_custom: String::new(),
+            banner_hot: BannerHot::Off,
         }
     }
 }

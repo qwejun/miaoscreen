@@ -445,6 +445,11 @@
         "random": {
           "label": "Random banner"
         },
+        "hot": {
+          "label": "Trending",
+          "off": "Off",
+          "weibo": "Weibo trending"
+        },
         "size": {
           "label": "Banner size"
         },

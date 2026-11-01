@@ -445,6 +445,11 @@
         "random": {
           "label": "Encorajamento aleatório"
         },
+        "hot": {
+          "label": "Assuntos do momento",
+          "off": "Desativado",
+          "weibo": "Tendências do Weibo"
+        },
         "size": {
           "label": "Tamanho do banner"
         },

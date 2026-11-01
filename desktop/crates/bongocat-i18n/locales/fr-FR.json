@@ -445,6 +445,11 @@
         "random": {
           "label": "Encouragement aléatoire"
         },
+        "hot": {
+          "label": "Sujets tendance",
+          "off": "Désactivé",
+          "weibo": "Tendances Weibo"
+        },
         "size": {
           "label": "Taille du bandeau"
         },

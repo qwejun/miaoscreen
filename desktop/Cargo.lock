@@ -818,6 +818,7 @@ dependencies = [
  "bongocat-ui",
  "bongocat-ui-protocol",
  "bongocat-update",
+ "cargo-packager-updater",
  "clap",
  "embed-resource",
  "gpui-kit",

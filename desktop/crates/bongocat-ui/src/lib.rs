@@ -10,7 +10,7 @@ mod external_link;
 mod pop_confirm;
 mod window;
 pub use window::{
-    BannerFont, BannerPools, BannerRows, BannerStyle, DeviceLink, DeviceLinkMode,
+    BannerFont, BannerHot, BannerPools, BannerRows, BannerStyle, DeviceLink, DeviceLinkMode,
     DeviceLinkProblem, DeviceLinkState,
     DeviceOverlayConfig, LiveLink,
     SettingsNavigationMemory, SettingsView, SettingsWindowHandle, SettingsWindowSeed,

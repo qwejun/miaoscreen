@@ -660,6 +660,50 @@ impl Render for SettingsView {
                             SettingItem::new(
                                 bongocat_i18n::text(
                                     language.catalog_locale(),
+                                    "settings.device_screen.banner.hot.label",
+                                ),
+                                SettingField::dropdown(
+                                    vec![
+                                        (
+                                            SharedString::from(BannerHot::Off.id()),
+                                            SharedString::from(bongocat_i18n::text(
+                                                language.catalog_locale(),
+                                                "settings.device_screen.banner.hot.off",
+                                            )),
+                                        ),
+                                        (
+                                            SharedString::from(BannerHot::Weibo.id()),
+                                            SharedString::from(bongocat_i18n::text(
+                                                language.catalog_locale(),
+                                                "settings.device_screen.banner.hot.weibo",
+                                            )),
+                                        ),
+                                    ],
+                                    {
+                                        let view = view_entity.clone();
+                                        move |app: &App| {
+                                            SharedString::from(
+                                                view.read(app).device_config().banner_hot.id(),
+                                            )
+                                        }
+                                    },
+                                    {
+                                        let view = view_entity.clone();
+                                        move |value: SharedString, app: &mut App| {
+                                            let hot = BannerHot::from_id(&value);
+                                            view.update(app, |view, cx| {
+                                                view.update_device_config(
+                                                    |config| config.banner_hot = hot,
+                                                    cx,
+                                                );
+                                            });
+                                        }
+                                    },
+                                ),
+                            ),
+                            SettingItem::new(
+                                bongocat_i18n::text(
+                                    language.catalog_locale(),
                                     "settings.device_screen.banner.size.label",
                                 ),
                                 SettingField::number_input(
