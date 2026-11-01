@@ -24,6 +24,31 @@ $ErrorActionPreference = 'Stop'
 $repo = Split-Path $PSScriptRoot -Parent
 $cargoBin = Join-Path $env:USERPROFILE '.cargo\bin'
 
+# `python` on PATH is often the Microsoft Store alias, which is a zero-byte
+# reparse point that prints "Python was not found" instead of running anything.
+# Packaging is the last step, so hitting it here wastes a full rebuild: resolve a
+# real interpreter up front and let the alias be the thing that gets skipped.
+function Resolve-Python {
+    if ($env:CATSCREEN_PYTHON) { return $env:CATSCREEN_PYTHON }
+    $found = Get-Command python -All -ErrorAction SilentlyContinue |
+        Where-Object { $_.Source -and $_.Source -notlike '*\WindowsApps\*' } |
+        Select-Object -First 1
+    if ($found) { return $found.Source }
+    $launcher = Get-Command py -ErrorAction SilentlyContinue
+    if ($launcher) { return $launcher.Source }
+    # This session has no python of its own on PATH, only the Store alias, but
+    # the sandbox ships one: take the newest that exists rather than failing the
+    # last step of a build that already ran for six minutes.
+    $bundled = Get-ChildItem (Join-Path $env:USERPROFILE '.workbuddy\binaries\python\versions') `
+        -Directory -ErrorAction SilentlyContinue |
+        Sort-Object Name -Descending |
+        ForEach-Object { Join-Path $_.FullName 'python.exe' } |
+        Where-Object { Test-Path $_ } |
+        Select-Object -First 1
+    if ($bundled) { return $bundled }
+    throw 'no python interpreter found; set CATSCREEN_PYTHON to one'
+}
+
 # The Windows build splices MinGW's `gcc` in as the linker's C compiler; without
 # it the `cc` crate picks up whatever msvc toolchain happens to be on PATH.
 if (Test-Path $Mingw) {
@@ -55,6 +80,8 @@ Write-Host '[3/3] archive'
 if ($SkipPack) {
     Write-Host '      skipped'
 } else {
-    & python (Join-Path $PSScriptRoot 'pack-release.py')
+    $python = Resolve-Python
+    Write-Host "      python: $python"
+    & $python (Join-Path $PSScriptRoot 'pack-release.py')
     if ($LASTEXITCODE -ne 0) { throw 'packaging failed' }
 }
