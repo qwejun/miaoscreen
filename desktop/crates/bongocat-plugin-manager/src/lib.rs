@@ -17,6 +17,14 @@ use std::{
 use thiserror::Error;
 
 pub const MANIFEST_FILE: &str = "plugin.json";
+/// The application version a plugin's `app_versions` range is checked against.
+///
+/// Every published plugin declares `app_versions: ">=2.3.1"`, and the range is
+/// matched on both sides of an install — once when the catalog is filtered, once
+/// when a package is registered. The product's own number is `0.1.x`, which no
+/// plugin has ever heard of, so both checks have to speak the upstream release
+/// the plugin code was built against. This constant is that number, in one place.
+pub const PLUGIN_HOST_VERSION: &str = "2.4.0";
 /// The directory under a plugin store root that holds installed package trees.
 pub const PACKAGES_DIRECTORY: &str = "packages";
 /// The directory under a plugin store root that holds plugin-owned data.
@@ -339,7 +347,7 @@ impl PluginManager {
 fn supports_application(metadata: &PluginMetadata) -> bool {
     use cargo_packager_updater::semver::{Version, VersionReq};
     VersionReq::parse(&metadata.app_versions).is_ok_and(|range| {
-        Version::parse(env!("CARGO_PKG_VERSION")).is_ok_and(|version| range.matches(&version))
+        Version::parse(PLUGIN_HOST_VERSION).is_ok_and(|version| range.matches(&version))
     })
 }
 #[cfg(test)]
@@ -360,6 +368,27 @@ mod tests {
             localizations: Default::default(),
         };
         assert!(install::validate(&PluginManifest { metadata }).is_err());
+    }
+    /// The published catalog's range, checked against the release this product
+    /// ships. Both gates — catalog filter and package registration — read the
+    /// same constant, so this pins the value a plugin is actually measured by.
+    #[test]
+    fn a_catalog_ranged_plugin_is_admitted() {
+        let metadata = |app_versions: &str| PluginMetadata {
+            id: "com.bongocat.pomodoro".into(),
+            name: "Pomodoro".into(),
+            description: "A focus timer.".into(),
+            version: "1.0.0".into(),
+            app_versions: app_versions.into(),
+            protocol_version: 1,
+            entry: "bongocat-pomodoro".into(),
+            icon: bongocat_plugin_sdk::PluginIcon::Emoji("A".into()),
+            capabilities: vec![],
+            localizations: Default::default(),
+        };
+        assert!(supports_application(&metadata(">=2.3.1")));
+        assert!(supports_application(&metadata(">=2.3.1, <3")));
+        assert!(!supports_application(&metadata(">=9")));
     }
 }
 

@@ -220,6 +220,20 @@ pub(crate) fn download_icon_blocking(
     download_bounded_blocking(url, MAX_ICON_BYTES, stop)
 }
 
+/// How long one package download may take, end to end.
+///
+/// The catalog is a few kilobytes and is read on a three-second budget, which is
+/// the right shape for a document that is fetched on every refresh. A package is
+/// not: `key-sounds` ships four megabytes of audio, and reusing the catalog's
+/// budget failed exactly that download while the two smaller packages installed.
+/// This is a stall bound, not a speed target — sixteen megabytes over a slow link
+/// still fits.
+const DOWNLOAD_TIMEOUT: Duration = Duration::from_secs(120);
+
+/// How long a single source may take to accept a connection before the next one
+/// is tried.
+const DOWNLOAD_CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
+
 fn download_bounded_blocking(
     url: &str,
     limit: usize,
@@ -227,6 +241,7 @@ fn download_bounded_blocking(
 ) -> Result<Vec<u8>, CatalogError> {
     let client = reqwest::blocking::Client::builder()
         .https_only(true)
+        .connect_timeout(DOWNLOAD_CONNECT_TIMEOUT)
         .build()
         .map_err(|_| CatalogError::Download)?;
     let official = GITHUB_PROXY_PREFIXES
@@ -247,7 +262,7 @@ fn download_bounded_blocking(
         }
         let result = client
             .get(source)
-            .timeout(Duration::from_secs(3))
+            .timeout(DOWNLOAD_TIMEOUT)
             .send()
             .and_then(|response| response.error_for_status());
         if let Ok(response) = result

@@ -30,17 +30,13 @@ pub use service::{PluginOverlayHandles, PluginService, PluginServiceStartError, 
 
 /// The application version the plugin catalog is checked against.
 ///
-/// A plugin declares the app releases it runs on (`app_versions`, `>=2.3.1` for
-/// everything in the published catalog), and the manager drops every entry that
-/// does not admit the version it was handed. That version used to be this
-/// product's own `CARGO_PKG_VERSION`, which is `0.1.x` — a number no plugin has
-/// ever heard of, so the center opened on "no plugins available" while the
-/// catalog was full.
-///
-/// The host code here is the upstream 2.4.0 tree, which is exactly what those
-/// plugins were built against; only the product's release number is local. This
-/// constant says so once, in the place that owns the question.
-pub const PLUGIN_HOST_VERSION: &str = "2.4.0";
+/// Re-exported from the manager, which is the crate that evaluates
+/// `app_versions` — on the catalog filter and again when a package is
+/// registered. Two constants would let the two checks disagree: an offer could
+/// be listed and then refused at install with "plugin excludes this application
+/// version", which is exactly what happened while only the catalog side knew
+/// about the upstream number.
+pub use bongocat_plugin_manager::PLUGIN_HOST_VERSION;
 
 /// How often the service looks for work.
 ///
