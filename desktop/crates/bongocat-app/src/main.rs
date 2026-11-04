@@ -571,7 +571,19 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         // strip later, and it needs a handle that outlives the
                         // render loop's ownership of the sink.
                         let handle = sink.handle();
-                        device_link::ProductDeviceLink::install(cx, address, handle.clone());
+                        // The panel draws the model, not the desktop, so the
+                        // plugin's panel never reaches it as pixels. What does
+                        // travel is the label the plugin publishes beside its
+                        // icon — the input method in use — and that is handed
+                        // over here so the strip can carry it as a line.
+                        device_link::ProductDeviceLink::install(
+                            cx,
+                            address,
+                            handle.clone(),
+                            plugin_overlay_handles
+                                .as_ref()
+                                .map(|handles| handles.status_text.clone()),
+                        );
                         // The panel is now the model's speaker. Until this point
                         // the audio service has had nowhere to send anything,
                         // which is what keeps a startup noise off the laptop.

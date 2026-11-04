@@ -20,6 +20,9 @@ pub use directory_opener::{DirectoryOpenError, open_directory};
 mod clipboard;
 pub use clipboard::{ClipboardError, read_clipboard_text, write_clipboard_text};
 
+mod keyboard_state;
+pub use keyboard_state::caps_lock_on;
+
 mod url_opener;
 pub use url_opener::{ExternalUrlOpenError, open_external_url};
 

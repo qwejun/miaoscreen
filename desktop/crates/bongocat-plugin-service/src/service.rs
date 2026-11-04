@@ -24,7 +24,7 @@ use std::{
     collections::BTreeMap,
     path::{Path, PathBuf},
     sync::{
-        Arc,
+        Arc, Mutex,
         atomic::{AtomicBool, Ordering},
         mpsc::{Receiver, SyncSender, TryRecvError, sync_channel},
     },
@@ -55,6 +55,9 @@ pub struct PluginOverlayHandles {
     pub viewport_reporter: HudViewportReporter,
     /// Where the window reports a click that landed on a plugin's control.
     pub interaction_sender: SyncSender<HudInteraction>,
+    /// The label a plugin published, for a display that draws a text strip
+    /// instead of a panel. Reading it never affects the panel.
+    pub status_text: StatusTextConsumer,
 }
 
 /// The service's own end of the overlay channels, plus its command client.
@@ -121,6 +124,11 @@ impl PluginService {
         let (hud_producer, hud_consumer) = latest_hud_channel();
         let (viewport_reporter, viewport) = latest_viewport_channel();
         let (interaction_sender, interactions) = sync_channel(64);
+        // Created here for the same reason as the layer pair: the label a panel
+        // carries and the display that shows it are two ends of one
+        // conversation, and a product that never wires the second end simply
+        // never reads it.
+        let (status_text_producer, status_text) = latest_status_text_channel();
         let stop = Arc::new(AtomicBool::new(false));
         let worker_stop = Arc::clone(&stop);
         let worker = thread::Builder::new()
@@ -133,6 +141,7 @@ impl PluginService {
                         hud_producer,
                         viewport,
                         interactions,
+                        status_text: status_text_producer,
                     },
                     worker_stop,
                     source,
@@ -151,6 +160,7 @@ impl PluginService {
                 hud_consumer,
                 viewport_reporter,
                 interaction_sender,
+                status_text,
             },
         ))
     }
@@ -186,11 +196,88 @@ impl Drop for PluginService {
     }
 }
 
+/// The newest line a plugin published as a status, for a display that cannot
+/// draw a panel.
+///
+/// The model window gets pixels: the whole panel is rasterized into one layer
+/// and drawn as a quad. The round panel has no such channel — it receives a
+/// strip of text lines and draws them itself — so the half of a plugin's panel
+/// that survives the trip is the label beside its icon. This channel carries
+/// exactly that string, and nothing else about the plugin.
+pub struct StatusTextProducer {
+    slot: Arc<Mutex<Option<Arc<str>>>>,
+}
+
+/// The display half of the status-text channel.
+#[derive(Clone)]
+pub struct StatusTextConsumer {
+    slot: Arc<Mutex<Option<Arc<str>>>>,
+}
+
+impl StatusTextProducer {
+    /// Publish the newest line, dropping it only when it differs from what the
+    /// display already holds: this runs on every worker pass, and a reader that
+    /// wakes up for an unchanged string would repaint the panel for nothing.
+    fn publish(&self, text: Option<Arc<str>>) {
+        let mut slot = self
+            .slot
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if *slot == text {
+            return;
+        }
+        *slot = text;
+    }
+}
+
+impl StatusTextConsumer {
+    /// The line a plugin last published, or `None` when nothing is showing one.
+    pub fn latest(&self) -> Option<Arc<str>> {
+        self.slot
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone()
+    }
+}
+
+/// A latest-value channel carrying one plugin's status label.
+pub fn latest_status_text_channel() -> (StatusTextProducer, StatusTextConsumer) {
+    let slot: Arc<Mutex<Option<Arc<str>>>> = Arc::new(Mutex::new(None));
+    (
+        StatusTextProducer {
+            slot: Arc::clone(&slot),
+        },
+        StatusTextConsumer { slot },
+    )
+}
+
+/// The one line a text-only display can take from a plugin's panel.
+///
+/// Only the icon-and-label node qualifies. It is the shape that already means
+/// "what is happening right now" — the input-source plugin says which input
+/// method is active this way — while a bare text node is a countdown or a price,
+/// and putting one of those on the panel would be news the panel cannot label.
+/// The first match wins, in plugin order, so a second status cannot overwrite
+/// the one the person installed the plugin for.
+fn status_line(frames: &[PluginHudFrame]) -> Option<Arc<str>> {
+    frames.iter().find_map(|frame| {
+        frame.view.nodes.iter().find_map(|node| match node {
+            UiNode::IconText { text, .. } => {
+                let text = text.trim();
+                (!text.is_empty()).then(|| Arc::from(text))
+            }
+            _ => None,
+        })
+    })
+}
+
 /// The service's end of the overlay channels.
 struct OverlaySinks {
     hud_producer: HudProducer,
     viewport: HudViewportReader,
     interactions: Receiver<HudInteraction>,
+    /// Where the label a panel carried leaves for a display that draws text.
+    status_text: StatusTextProducer,
 }
 
 /// The worker's whole state.
@@ -1034,12 +1121,17 @@ impl Worker {
 
     /// Publish the plugins' current views only when their composed input changed.
     fn compose(&mut self) {
+        // The label travels before the compositor is consulted. A display that
+        // draws text lines needs no font, no window size and no rasterizer, so
+        // it must not be behind the check that the panel bitmap is.
+        let running = self.running_frames();
+        self.hud.status_text.publish(status_line(&running));
         let Some(compositor) = self.compositor.as_ref() else {
             return;
         };
         let viewport = self.hud.viewport.latest();
         let frames = if viewport.is_usable() {
-            self.running_frames()
+            running
         } else {
             Vec::new()
         };
@@ -1105,6 +1197,7 @@ mod tests {
         let (hud_producer, _) = latest_hud_channel();
         let (_, viewport) = latest_viewport_channel();
         let (_, interactions) = sync_channel(4);
+        let (status_text, _) = latest_status_text_channel();
         Worker {
             manager: PluginManager::new(store.path().to_path_buf()).unwrap(),
             source: PluginSource::InstalledOnly,
@@ -1122,6 +1215,7 @@ mod tests {
                 hud_producer,
                 viewport,
                 interactions,
+                status_text,
             },
             compositor: None,
             error: None,

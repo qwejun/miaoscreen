@@ -10,12 +10,14 @@
 
 use std::net::{IpAddr, Ipv4Addr, SocketAddr, UdpSocket};
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use bongocat_audio::MotionAudioSink;
-use bongocat_magneo::protocol::{Font, Overlay, Rows};
+use bongocat_magneo::protocol::{Align, Font, Overlay, OverlayLine, Rows, Weight};
 use bongocat_magneo::MagneoHandle;
+use bongocat_plugin_service::StatusTextConsumer;
 use bongocat_ui::{
     BannerFont, BannerHot, BannerPools, BannerRows, BannerStyle, DeviceLink, DeviceLinkMode,
     DeviceLinkProblem, DeviceLinkState, DeviceOverlayConfig,
@@ -99,6 +101,37 @@ const BANNER_HOT_INTERVAL_RANGE: (u16, u16) = (3, 120);
 /// never meets the bezel.
 const LOW_BANNER_SIZE: u16 = 22;
 const LOW_BANNER_CENTER_Y: f32 = 748.0;
+
+/// Where a plugin's status label sits when the panel has one to show, and how
+/// large it is drawn.
+///
+/// Level with the clock card, on the opposite side: at the very top the chord is
+/// narrow, so a right-aligned line there hangs in the empty black above the cat
+/// with nothing to belong to. One card's height lower — the card sits at 158 and
+/// is 106 tall — the label reads as its right-hand neighbour, and the chord at
+/// that height still carries two characters at a size that reads from arm's
+/// length.
+const STATUS_LINE_SIZE: u16 = 28;
+const STATUS_LINE_CENTER_Y: f32 = 211.0;
+const STATUS_LINE_COLOR: u32 = 0xFFF2_F4F7;
+
+/// The label's colour while the case lock is on.
+///
+/// The strip has room for one character and a colour, not for a word: a second
+/// character beside the method reads as part of its name — "五 大" is read as
+/// "五大" before anyone parses the space — and an extra line would push the
+/// design the panel was drawn around. Red is the one signal that costs no width
+/// and survives being read at arm's length, and it is unmistakable against the
+/// white the label normally wears.
+const STATUS_LOCKED_COLOR: u32 = 0xFFFF_3B30;
+
+/// How often the status line is re-read from the plugin service.
+///
+/// The service publishes on its own 50 ms loop and only when the label changed,
+/// so this is a poll of a latest-value slot rather than a second cadence: a
+/// switch of input method reaches the panel within this period, and an idle
+/// desktop costs one lock every half second.
+const STATUS_CHECK: Duration = Duration::from_millis(500);
 
 /// The publisher as the model's audio destination.
 ///
@@ -294,6 +327,24 @@ pub(crate) struct ProductDeviceLink {
     /// changes while nobody is looking, and writing every refresh to disk would
     /// rewrite the file under the person's edits.
     hot_line: Mutex<Option<String>>,
+    /// Where the current plugin status label comes from, when a plugin service
+    /// is running at all.
+    ///
+    /// The panel cannot draw a plugin's panel — it receives text lines and draws
+    /// them itself — so this is the one thing from that panel that reaches it:
+    /// the label the plugin publishes next to its icon, which for the input
+    /// source plugin is the name of the input method in use.
+    status_source: Option<StatusTextConsumer>,
+    /// The label currently on the panel, so a repaint of the strip carries it
+    /// and a worker pass that changed nothing does not.
+    status_line: Mutex<Option<String>>,
+    /// Whether Caps Lock was on at the last read.
+    ///
+    /// The plugin reports the input method and nothing about the keyboard, so
+    /// the case lock is read here and drawn beside the label. Held as the last
+    /// value seen rather than as part of the label so a lock toggled while the
+    /// method stays the same still reaches the glass.
+    caps_lock: AtomicBool,
 }
 
 impl ProductDeviceLink {
@@ -309,7 +360,12 @@ impl ProductDeviceLink {
 
     /// Loads the stored strip, installs the page's link, and pushes the strip to
     /// the panel immediately so a connecting device has it before its first frame.
-    pub(crate) fn install(cx: &mut App, address: &str, handle: MagneoHandle) -> Arc<Self> {
+    pub(crate) fn install(
+        cx: &mut App,
+        address: &str,
+        handle: MagneoHandle,
+        status_source: Option<StatusTextConsumer>,
+    ) -> Arc<Self> {
         let path = Self::config_path();
         let mut stored = path
             .as_ref()
@@ -338,9 +394,16 @@ impl ProductDeviceLink {
             adb_configured,
             path,
             hot_line: Mutex::new(None),
+            status_source,
+            status_line: Mutex::new(None),
+            caps_lock: AtomicBool::new(bongocat_platform::caps_lock_on()),
         });
-        link.handle
-            .set_overlay(Some(Arc::new(overlay_for(&config, None))));
+        link.handle.set_overlay(Some(Arc::new(overlay_for(
+            &config,
+            None,
+            None,
+            link.caps_lock.load(Ordering::Relaxed),
+        ))));
         // A headless run has no settings window to ask for snapshots, so the
         // environment can ask instead. This is how the snapshot channel is
         // verified without a person opening a page.
@@ -355,6 +418,7 @@ impl ProductDeviceLink {
         link.apply_mode();
         link.watch_cable();
         link.watch_hot_banner();
+        link.watch_status_text();
         link
     }
 
@@ -445,6 +509,54 @@ impl ProductDeviceLink {
         }
     }
 
+    /// Keeps the plugin status label current on the panel.
+    ///
+    /// A thread of its own because the source is a lock the plugin worker
+    /// publishes into on its own clock, and the strip only changes when the
+    /// answer does: switching input method must reach the glass, but a machine
+    /// where nothing is typed in must not repaint for a label that did not move.
+    fn watch_status_text(self: &Arc<Self>) {
+        let Some(source) = self.status_source.clone() else {
+            return;
+        };
+        let weak = Arc::downgrade(self);
+        let spawned = std::thread::Builder::new()
+            .name("device-status".to_owned())
+            .spawn(move || {
+                loop {
+                    std::thread::sleep(STATUS_CHECK);
+                    let Some(link) = weak.upgrade() else {
+                        return;
+                    };
+                    let incoming = source.latest().map(|text| text.to_string());
+                    // Read on the same pass as the label so the badge and the
+                    // name change together: the panel has no spinner, and a
+                    // label that arrives a frame after its lock looks like the
+                    // lock came from the method switch rather than from the key.
+                    let caps = bongocat_platform::caps_lock_on();
+                    let changed = {
+                        let caps_moved = link.caps_lock.swap(caps, Ordering::Relaxed) != caps;
+                        let mut stored = link
+                            .status_line
+                            .lock()
+                            .unwrap_or_else(std::sync::PoisonError::into_inner);
+                        let label_moved = *stored != incoming;
+                        *stored = incoming;
+                        caps_moved || label_moved
+                    };
+                    if changed {
+                        link.push_overlay();
+                    }
+                }
+            });
+        if let Err(error) = spawned {
+            // Same reasoning as the banner thread: a missing label is a
+            // decoration, not a reason to refuse to start, but silence would
+            // make the plugin look broken.
+            eprintln!("device status worker did not start: {error}");
+        }
+    }
+
     fn hot_source(&self) -> BannerHot {
         self.config
             .lock()
@@ -485,7 +597,8 @@ impl ProductDeviceLink {
         self.push_overlay();
     }
 
-    /// Re-sends the strip as it stands, including whatever the hot list holds.
+    /// Re-sends the strip as it stands, including whatever the hot list and the
+    /// plugin status hold.
     fn push_overlay(&self) {
         let config = self
             .config
@@ -497,8 +610,17 @@ impl ProductDeviceLink {
         } else {
             self.hot_line()
         };
-        self.handle
-            .set_overlay(Some(Arc::new(overlay_for(&config, line.as_deref()))));
+        let status = self
+            .status_line
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone();
+        self.handle.set_overlay(Some(Arc::new(overlay_for(
+            &config,
+            line.as_deref(),
+            status.as_deref(),
+            self.caps_lock.load(Ordering::Relaxed),
+        ))));
     }
 
     /// Keeps the cable path working after the moment it was set up.
@@ -812,8 +934,15 @@ impl DeviceLink for ProductDeviceLink {
         } else {
             self.hot_line()
         };
-        self.handle
-            .set_overlay(Some(Arc::new(overlay_for(config, line.as_deref()))));
+        self.handle.set_overlay(Some(Arc::new(overlay_for(
+            config,
+            line.as_deref(),
+            self.status_line
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .as_deref(),
+            self.caps_lock.load(Ordering::Relaxed),
+        ))));
         let mut stored = self
             .config
             .lock()
@@ -884,7 +1013,12 @@ fn random_banner_spec(config: &DeviceOverlayConfig) -> String {
 /// Typography comes from `Overlay::default_strip` and only the text travels, so
 /// the page can stay a text editor instead of growing a font picker: the panel's
 /// three lines are a design, not a document.
-fn overlay_for(config: &DeviceOverlayConfig, hot: Option<&str>) -> Overlay {
+fn overlay_for(
+    config: &DeviceOverlayConfig,
+    hot: Option<&str>,
+    status: Option<&str>,
+    caps_lock: bool,
+) -> Overlay {
     if !config.enabled || config.band_px == 0 {
         let mut off = Overlay::default_strip();
         off.band_px = 0;
@@ -942,6 +1076,162 @@ fn overlay_for(config: &DeviceOverlayConfig, hot: Option<&str>) -> Overlay {
             BannerRows::Two => Rows::Two,
         };
     }
+    // The plugin's label travels as a fourth line rather than as part of any of
+    // the three: the panel draws text it is given and knows nothing about
+    // plugins, and a line of its own is the only shape that leaves the card, the
+    // date and the banner exactly where the layout put them. A panel that was
+    // built before this line existed reads the count and draws it too — the
+    // format has always carried a list, not a fixed three.
+    if let Some(text) = status.and_then(short_status) {
+        strip.lines.push(OverlayLine {
+            text,
+            size_px: STATUS_LINE_SIZE,
+            // The lock is carried by the colour rather than by another
+            // character: the line answers two questions at once — which method
+            // and whether it comes out in capitals — and the second one has no
+            // room for words beside the first.
+            color: if caps_lock {
+                STATUS_LOCKED_COLOR
+            } else {
+                STATUS_LINE_COLOR
+            },
+            align: Align::Right,
+            weight: Weight::Regular,
+            font: Font::Rounded,
+            center_y: STATUS_LINE_CENTER_Y,
+            // One row: a name is a label, not a sentence. A panel that cannot
+            // fit it clips at the bezel rather than growing a second row and
+            // pushing the whole strip out of the layout it was drawn around.
+            rows: Rows::One,
+            style: 0,
+        });
+    }
     strip
 }
 
+/// The one character that says which input method is on.
+///
+/// The first character of the method's own name is the whole distinction:
+/// "五笔" and "拼音" begin with two different characters, and nothing else on a
+/// panel that already carries a clock, a date and a banner needs to spell them
+/// out. The vendor prefix is dropped the same way, and a method the system names
+/// in another script is named in the Chinese the rest of the strip uses — a line
+/// of Latin capitals beside a clock reads as a status code, not as a name.
+///
+/// A method nobody has mapped keeps its own first two characters: one is the
+/// convention above, but two is what keeps an unfamiliar name identifiable at
+/// the size the line is drawn.
+fn short_status(label: &str) -> Option<String> {
+    let text = label.trim();
+    if text.is_empty() {
+        return None;
+    }
+    let lower = text.to_lowercase();
+    let (short, width) = if text.contains("五笔") || lower.contains("wubi") {
+        ("五", 1)
+    } else if text.contains("拼音") || lower.contains("pinyin") {
+        ("拼", 1)
+    } else if text.contains("日文") || text.contains("日语") || lower.contains("japanese") {
+        ("日", 1)
+    } else if text.contains("英文")
+        || text.contains("英语")
+        || text.contains("美式")
+        || lower.contains("english")
+        || !text.chars().any(is_han)
+    {
+        ("英", 1)
+    } else {
+        let stripped = text
+            .trim_start_matches("微软")
+            .trim_start_matches("Microsoft")
+            .trim();
+        (if stripped.is_empty() { text } else { stripped }, 2)
+    };
+    let clipped: String = short.chars().take(width).collect();
+    (!clipped.is_empty()).then_some(clipped)
+}
+
+/// Whether a character is a Han ideograph, in the range the panel's own faces
+/// draw.
+///
+/// The test is deliberately narrow rather than "any non-ASCII": a Japanese or
+/// Korean name that reached this point is not the English keyboard, and treating
+/// a whole script as one case would relabel it.
+fn is_han(character: char) -> bool {
+    ('\u{4E00}'..='\u{9FFF}').contains(&character)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_method_is_named_by_itself_rather_than_by_its_vendor() {
+        assert_eq!(short_status("微软五笔").as_deref(), Some("五"));
+        assert_eq!(short_status("微软拼音").as_deref(), Some("拼"));
+        assert_eq!(short_status("Microsoft Wubi").as_deref(), Some("五"));
+        assert_eq!(short_status("搜狗拼音输入法").as_deref(), Some("拼"));
+    }
+
+    #[test]
+    fn an_english_layout_reads_as_the_language_the_strip_is_written_in() {
+        assert_eq!(short_status("美式键盘").as_deref(), Some("英"));
+        assert_eq!(short_status("English (US)").as_deref(), Some("英"));
+        // A bare layout code is not a name: it becomes the language it stands
+        // for, because a line of capitals beside a clock reads as an error.
+        assert_eq!(short_status("ENG").as_deref(), Some("英"));
+        assert_eq!(short_status("US").as_deref(), Some("英"));
+        assert_eq!(
+            short_status("Very Long Method Name").as_deref(),
+            Some("英")
+        );
+    }
+
+    #[test]
+    fn an_unmapped_name_keeps_two_characters_of_its_own() {
+        assert_eq!(short_status("某某形码").as_deref(), Some("某某"));
+        assert_eq!(short_status("  ").as_deref(), None);
+        assert_eq!(short_status("五笔字型超长名字").as_deref(), Some("五"));
+    }
+
+    #[test]
+    fn the_strip_carries_the_label_as_a_fourth_line_beside_the_clock() {
+        let config = DeviceOverlayConfig::default();
+        let overlay = overlay_for(&config, None, Some("微软拼音"), false);
+        assert_eq!(overlay.lines.len(), 4);
+        let status = overlay.lines.last().expect("the label line");
+        assert_eq!(status.text, "拼");
+        assert_eq!(status.align, Align::Right);
+        assert_eq!(status.center_y, STATUS_LINE_CENTER_Y);
+        // The three designed lines keep the places they had: a label must not
+        // push the clock, the date or the banner around.
+        let untouched = overlay_for(&config, None, None, false);
+        for (with, without) in overlay.lines.iter().zip(untouched.lines.iter()) {
+            assert_eq!(with.center_y, without.center_y);
+            assert_eq!(with.size_px, without.size_px);
+        }
+    }
+
+    #[test]
+    fn the_case_lock_repaints_the_label_instead_of_adding_a_character() {
+        let config = DeviceOverlayConfig::default();
+        let locked = overlay_for(&config, None, Some("微软五笔"), true);
+        let unlocked = overlay_for(&config, None, Some("微软五笔"), false);
+        assert_eq!(locked.lines.len(), unlocked.lines.len());
+        let locked_line = locked.lines.last().expect("the label line");
+        let unlocked_line = unlocked.lines.last().expect("the label line");
+        // Same text, same place, different colour: a second character beside the
+        // method was read as part of its name ("五 大" reads as "五大").
+        assert_eq!(locked_line.text, unlocked_line.text);
+        assert_eq!(locked_line.text, "五");
+        assert_eq!(unlocked_line.color, STATUS_LINE_COLOR);
+        assert_eq!(locked_line.color, STATUS_LOCKED_COLOR);
+    }
+
+    #[test]
+    fn a_disabled_strip_has_no_label_either() {
+        let mut config = DeviceOverlayConfig::default();
+        config.enabled = false;
+        assert!(overlay_for(&config, None, Some("拼音"), true).lines.is_empty());
+    }
+}

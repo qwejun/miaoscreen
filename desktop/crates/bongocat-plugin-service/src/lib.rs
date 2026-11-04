@@ -26,7 +26,10 @@ pub use command::{
     PluginCard, PluginCenterSnapshot, PluginCommand, PluginCommandError, PluginInteractionFailure,
     PluginReply, PluginServiceClient, PluginServiceClosed, PluginServiceEndpoint,
 };
-pub use service::{PluginOverlayHandles, PluginService, PluginServiceStartError, plugin_directory};
+pub use service::{
+    PluginOverlayHandles, PluginService, PluginServiceStartError, StatusTextConsumer,
+    latest_status_text_channel, plugin_directory,
+};
 
 /// The application version the plugin catalog is checked against.
 ///
