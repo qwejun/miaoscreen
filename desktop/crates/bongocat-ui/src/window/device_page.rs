@@ -517,6 +517,15 @@ pub trait DeviceLink: Send + Sync + 'static {
     fn retry(&self);
     /// Whether a panel is connected, and why not when the path itself is broken.
     fn state(&self) -> DeviceLinkState;
+    /// The strip settings the link is holding right now.
+    ///
+    /// The link reads them from disk before the settings window exists, so this
+    /// is what the page has to start from. Starting from `Default` instead left
+    /// the page showing defaults while the panel showed the stored settings —
+    /// the trending switch read "off" over a panel that was cycling titles —
+    /// and the first edit on any unrelated row pushed the whole default set
+    /// back over the stored one.
+    fn config(&self) -> DeviceOverlayConfig;
     /// Push the strip to the panel. Called on every edit, so it must be cheap.
     fn apply_overlay(&self, config: &DeviceOverlayConfig);
     /// Ask the panel to start or stop sending snapshots.

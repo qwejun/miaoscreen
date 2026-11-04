@@ -701,6 +701,15 @@ impl DeviceLink for ProductDeviceLink {
         }
     }
 
+    fn config(&self) -> DeviceOverlayConfig {
+        // Cloned under the lock rather than borrowed: the page edits its own
+        // copy and pushes it back, so nothing may hold this one open.
+        self.config
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone()
+    }
+
     fn live(&self) -> Option<LiveLink> {
         let peer = self.handle.peer_address()?;
         // The road is read off the peer, not off the setting. A listener bound

@@ -406,7 +406,9 @@ impl SettingsView {
             hold_modifier_recording_generation: 0,
             plugin_host: PluginHost::default(),
             plugin_settings: None,
-            device_config: super::DeviceOverlayConfig::default(),
+            device_config: super::device_page::device_link(cx)
+                .map(|link| link.config())
+                .unwrap_or_default(),
             device_preview: None,
             device_preview_revision: 0,
             device_preview_ticker: false,
